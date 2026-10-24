@@ -204,7 +204,7 @@ const NS = 'error-atlas'
     // Bumped on every client change so the panel itself can prove which bundle is
     // live. The chip next to the title shows it; if it is stale the page is running
     // an older bundle and no amount of editing here will be visible.
-    const BUILD = 'V42'
+    const BUILD = 'V43'
 
     const ZH = {
       nav: '错误星图',
@@ -1543,7 +1543,7 @@ const NS = 'error-atlas'
           gl.useProgram(nodeProgram)
           gl.uniformMatrix4fv(nodeLoc.uVP, false, vp)
           gl.uniform1f(nodeLoc.uFocal, focalDevice)
-          gl.uniform1f(nodeLoc.uSizeMul, 1.0)
+          gl.uniform1f(nodeLoc.uSizeMul, Math.max(0.5, state.scale))
           gl.uniform1f(nodeLoc.uAlphaMul, 1.0)
           gl.bindBuffer(gl.ARRAY_BUFFER, flowBuffers.position)
           gl.enableVertexAttribArray(nodeLoc.position)
