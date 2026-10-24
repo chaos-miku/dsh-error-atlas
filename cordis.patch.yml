@@ -1,0 +1,3 @@
+- insert:
+    - id: error-atlas
+      name: 'dsh-error-atlas'

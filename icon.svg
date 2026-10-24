@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <radialGradient id="halo" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ff4d5a" stop-opacity="0.85"/>
+      <stop offset="60%" stop-color="#ff4d5a" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#ff4d5a" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="#07080c"/>
+  <g stroke="#ff8fa3" stroke-opacity="0.55" stroke-width="1.2" stroke-linecap="round">
+    <line x1="32" y1="30" x2="16" y2="17"/>
+    <line x1="32" y1="30" x2="48" y2="18"/>
+    <line x1="32" y1="30" x2="47" y2="45"/>
+    <line x1="32" y1="30" x2="17" y2="47"/>
+    <line x1="16" y1="17" x2="48" y2="18"/>
+    <line x1="17" y1="47" x2="47" y2="45"/>
+  </g>
+  <circle cx="32" cy="30" r="14" fill="url(#halo)"/>
+  <g fill="#ffe9ec">
+    <circle cx="16" cy="17" r="3"/>
+    <circle cx="48" cy="18" r="2.4"/>
+    <circle cx="47" cy="45" r="3.2"/>
+    <circle cx="17" cy="47" r="2.2"/>
+  </g>
+  <circle cx="32" cy="30" r="4.6" fill="#ff4d5a"/>
+  <circle cx="32" cy="30" r="1.9" fill="#fff5f6"/>
+</svg>

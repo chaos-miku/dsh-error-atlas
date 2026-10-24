@@ -1,0 +1,66 @@
+{
+  "name": "dsh-error-atlas",
+  "version": "0.11.0",
+  "type": "module",
+  "description": "Records runtime errors and coding-task retrospectives, and renders them as an interactive GPU knowledge graph (WebGL) with lesson links, recurrence flags, program hubs, search, activity trends, and a caption switch.",
+  "icon": "icon.svg",
+  "license": "MIT",
+  "author": "chaos-miku",
+  "homepage": "https://github.com/chaos-miku/dsh-error-atlas",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chaos-miku/dsh-error-atlas.git"
+  },
+  "bugs": {
+    "url": "https://github.com/chaos-miku/dsh-error-atlas/issues"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "cordis-plugin",
+    "retrospective",
+    "knowledge-graph",
+    "error-tracking",
+    "agent-memory",
+    "webgl"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "bin/*.mjs",
+    "test/*.mjs",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "docs/*.jpg"
+  ],
+  "bin": {
+    "atlas-retro": "./bin/atlas-retro.mjs",
+    "atlas-digest": "./bin/atlas-digest.mjs"
+  },
+  "scripts": {
+    "test": "node test/run.mjs",
+    "smoke": "node test/smoke.mjs",
+    "digest": "node bin/atlas-digest.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": []
+    }
+  }
+}
