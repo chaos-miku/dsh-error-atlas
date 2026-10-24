@@ -204,7 +204,7 @@ const NS = 'error-atlas'
     // Bumped on every client change so the panel itself can prove which bundle is
     // live. The chip next to the title shows it; if it is stale the page is running
     // an older bundle and no amount of editing here will be visible.
-    const BUILD = 'V47'
+    const BUILD = 'V48'
 
     const ZH = {
       nav: '错误星图',
@@ -248,6 +248,8 @@ const NS = 'error-atlas'
       halo: '光晕',
       flow: '光点',
       spread: '间距',
+      nodeColors: '节点',
+      linkColors: '线条',
       style: '外观',
       pause: '暂停',
       resume: '继续',
@@ -361,6 +363,8 @@ const NS = 'error-atlas'
       halo: 'Glow',
       flow: 'Pulse',
       spread: 'Spread',
+      nodeColors: 'Nodes',
+      linkColors: 'Lines',
       style: 'Look',
       pause: 'Pause',
       resume: 'Resume',
@@ -855,6 +859,10 @@ const NS = 'error-atlas'
         raf: 0,
         disposed: false,
         alphaDirty: true,
+        // Colour filters: node kinds and link roles the user has switched off.
+        hiddenKinds: new Set(),
+        hiddenLinks: new Set(),
+        linkRoles: [],
         signature: null,
         needsFit: true,
         fitDist: 96,
@@ -1712,6 +1720,10 @@ const NS = 'error-atlas'
         for (const node of state.labelNodes) {
           const el = state.labels.get(node.id)
           if (!el) continue
+          if (state.hiddenKinds.has(node.kind)) {
+            el.style.opacity = '0'
+            continue
+          }
           const idx = state.byId.get(node.id)
           if (idx === undefined || state.depth[idx] <= 0) {
             el.style.opacity = '0'
@@ -1786,6 +1798,7 @@ const NS = 'error-atlas'
             else if (state.neighbors.has(id)) state.alpha[i] = 0.85
             else state.alpha[i] = 0.1
             if (matches) state.alpha[i] = matches.has(id) ? Math.max(state.alpha[i], 0.95) : state.alpha[i] * 0.12
+            if (state.hiddenKinds.size > 0 && state.hiddenKinds.has(state.nodes[i].kind)) state.alpha[i] = 0
           }
           state.alphaDirty = false
         }
@@ -1839,6 +1852,7 @@ const NS = 'error-atlas'
         const pairs = []
         const linkColor = []
         const linkAlpha = []
+        const linkRoles = []
         for (const link of rawLinks) {
           const a = byId.get(link && link.s)
           const b = byId.get(link && link.t)
@@ -1854,6 +1868,7 @@ const NS = 'error-atlas'
             const lc = stale ? STALE_COLOR : KIND_COLOR.retro || [0.78, 0.62, 1]
             linkColor.push(lc[0], lc[1], lc[2], lc[0], lc[1], lc[2])
             linkAlpha.push(stale ? 0.66 : 0.46, stale ? 0.66 : 0.46)
+            linkRoles.push('lesson')
             continue
           }
           const ca = KIND_COLOR[nodes[a].kind] || [1, 1, 1]
@@ -1868,6 +1883,7 @@ const NS = 'error-atlas'
           const rootSpoke = nodes[a].kind === 'root' || nodes[b].kind === 'root'
           const alpha = satelliteEdge ? 0.34 : rootSpoke ? 0.07 : 0.2
           linkAlpha.push(alpha, alpha)
+          linkRoles.push(satelliteEdge ? 'project' : rootSpoke ? 'core' : 'hub')
         }
 
         const count = nodes.length
@@ -1912,6 +1928,8 @@ const NS = 'error-atlas'
         state.linkVerts = new Float32Array(links.length * 6)
         state.linkColor = new Float32Array(linkColor)
         state.linkAlpha = new Float32Array(linkAlpha)
+        state.linkBaseAlpha = Float32Array.from(linkAlpha)
+        state.linkRoles = linkRoles
         state.sx = new Float32Array(count)
         state.sy = new Float32Array(count)
         state.depth = new Float32Array(count)
@@ -2176,6 +2194,21 @@ const NS = 'error-atlas'
           state.spread = Math.max(0.35, Math.min(2.4, Number(value) || 1))
         },
 
+        setFilters(nodeKinds, linkRoles) {
+          state.hiddenKinds = new Set(Array.isArray(nodeKinds) ? nodeKinds : [])
+          state.hiddenLinks = new Set(Array.isArray(linkRoles) ? linkRoles : [])
+          state.alphaDirty = true
+          const base = state.linkBaseAlpha
+          if (base && state.linkAlpha) {
+            for (let i = 0; i < state.linkRoles.length; i += 1) {
+              const off = state.hiddenLinks.has(state.linkRoles[i]) ? 0 : 1
+              state.linkAlpha[i * 2] = base[i * 2] * off
+              state.linkAlpha[i * 2 + 1] = base[i * 2 + 1] * off
+            }
+            uploadLinks()
+          }
+        },
+
         setSpin(value) {
           const next = Number(value)
           if (!Number.isFinite(next)) return
@@ -2274,6 +2307,21 @@ const NS = 'error-atlas'
 .dshea-stat-label { font-size: 9px; letter-spacing: 0.16em; color: rgba(236, 238, 243, 0.42); text-transform: uppercase; }
 .dshea-spacer { flex: 1 1 auto; }
 .dshea-actions { display: flex; align-items: center; gap: 7px; }
+.dshea-colors { display: flex; align-items: center; gap: 3px; padding: 2px 6px; border: 1px solid rgba(255, 122, 132, 0.16); border-radius: 999px; }
+.dshea-colors-label { font: 600 8px/1 ui-monospace, monospace; letter-spacing: 0.14em; color: var(--dsw-alias-label-tertiary, #8a8f98); margin-right: 2px; }
+.dshea-chip {
+  width: 9px;
+  height: 9px;
+  padding: 0;
+  border: 1px solid var(--chip);
+  border-radius: 50%;
+  background: transparent;
+  opacity: 0.34;
+  cursor: pointer;
+  transition: opacity 120ms ease, box-shadow 120ms ease;
+}
+.dshea-chip.is-on { opacity: 1; background: var(--chip); box-shadow: 0 0 6px var(--chip); }
+.dshea-chip:hover { opacity: 0.85; }
 .dshea-style {
   display: none;
   position: absolute;
@@ -2677,6 +2725,21 @@ const NS = 'error-atlas'
           return 100
         }
       })
+      const readFilters = (key) => {
+        try {
+          const raw = window.localStorage.getItem(key)
+          const list = raw ? JSON.parse(raw) : []
+          return Array.isArray(list) ? list.filter((item) => typeof item === 'string') : []
+        } catch {
+          return []
+        }
+      }
+      const [offKinds, setOffKinds] = useState(() => readFilters('dsh-error-atlas-off-kinds'))
+      const [offLinks, setOffLinks] = useState(() => readFilters('dsh-error-atlas-off-links'))
+      const offKindsRef = useRef(offKinds)
+      const offLinksRef = useRef(offLinks)
+      offKindsRef.current = offKinds
+      offLinksRef.current = offLinks
       const [styleOpen, setStyleOpen] = useState(false)
       const [halo, setHalo] = useState(() => {
         try {
@@ -2868,6 +2931,7 @@ const NS = 'error-atlas'
           if (renderer) renderer.setHalo(halo / 100)
           if (renderer) renderer.setFlowScale(flowScale / 100)
           if (renderer) renderer.setSpread(spread / 100)
+          if (renderer) renderer.setFilters(offKindsRef.current, offLinksRef.current)
       }, [spin])
 
       useEffect(() => {
@@ -2898,6 +2962,32 @@ const NS = 'error-atlas'
         const renderer = rendererRef.current
         if (renderer) renderer.setPaused(next)
         setPaused(next)
+      }, [])
+
+      const toggleKind = useCallback((kind) => {
+        const next = offKindsRef.current.includes(kind)
+          ? offKindsRef.current.filter((item) => item !== kind)
+          : offKindsRef.current.concat(kind)
+        setOffKinds(next)
+        try {
+          window.localStorage.setItem('dsh-error-atlas-off-kinds', JSON.stringify(next))
+        } catch {
+          /* storage is best effort */
+        }
+        if (rendererRef.current) rendererRef.current.setFilters(next, offLinksRef.current)
+      }, [])
+
+      const toggleLink = useCallback((role) => {
+        const next = offLinksRef.current.includes(role)
+          ? offLinksRef.current.filter((item) => item !== role)
+          : offLinksRef.current.concat(role)
+        setOffLinks(next)
+        try {
+          window.localStorage.setItem('dsh-error-atlas-off-links', JSON.stringify(next))
+        } catch {
+          /* storage is best effort */
+        }
+        if (rendererRef.current) rendererRef.current.setFilters(offKindsRef.current, next)
       }, [])
 
       const onSpread = useCallback((value) => {
@@ -3101,6 +3191,24 @@ const NS = 'error-atlas'
 
       const rateLabel = paused ? '0.0°/s' : ((spin / 100) * SPIN_DEG_PER_SEC).toFixed(1) + '°/s'
 
+      const chipRow = (label, items, off, onToggle) =>
+        h(
+          'div',
+          { className: 'dshea-colors', title: label },
+          h('span', { className: 'dshea-colors-label' }, label),
+          items.map(([value, color]) =>
+            h('button', {
+              key: value,
+              type: 'button',
+              className: 'dshea-chip' + (off.includes(value) ? '' : ' is-on'),
+              style: { '--chip': color },
+              title: value,
+              onClick: () => onToggle(value),
+              'aria-pressed': off.includes(value) ? 'false' : 'true',
+            }),
+          ),
+        )
+
       const header = h(
         'div',
         { className: 'dshea-header' },
@@ -3127,6 +3235,32 @@ const NS = 'error-atlas'
         h(
           'div',
           { className: 'dshea-actions' },
+          chipRow(
+            COPY.nodeColors,
+            [
+              ['agent', '#ff4453'],
+              ['tool', '#ffb570'],
+              ['exit', '#ffd68f'],
+              ['config', '#d89eff'],
+              ['sessionhub', '#ffd9e4'],
+              ['project', '#7fd4ff'],
+              ['dev', '#7ff3e0'],
+              ['retro', '#c7a4ff'],
+            ],
+            offKinds,
+            toggleKind,
+          ),
+          chipRow(
+            COPY.linkColors,
+            [
+              ['core', '#7a2b31'],
+              ['hub', '#8a6a4a'],
+              ['project', '#7fd4ff'],
+              ['lesson', '#c7a4ff'],
+            ],
+            offLinks,
+            toggleLink,
+          ),
           h('button', { type: 'button', className: 'dshea-btn', onClick: onRefresh, disabled: busy }, COPY.refresh),
           h('input', {
             type: 'search',

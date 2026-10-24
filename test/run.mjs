@@ -558,6 +558,28 @@ async function clientSection() {
   check('the label switch brings the captions back', labelElement.style.display === '' && state.showLabels === true)
   check('a program is a hub', module.__debug.isHubNode('project') === true)
 
+  // Colour filters: switching a kind off zeroes its alpha, switching a wire role off
+  // zeroes that role's link alpha, and clearing the filter restores both.
+  eq('both colour filters render', (html.match(/class="dshea-colors"/g) || []).length, 2)
+  check('the colour filters carry chips', (html.match(/class="dshea-chip/g) || []).length >= 10)
+  const exitIdx = state.nodes.findIndex((node) => node.kind === 'exit')
+  const retroIdx = state.nodes.findIndex((node) => node.kind === 'retro')
+  check('the fixture carries an exit failure', exitIdx >= 0, String(exitIdx))
+  renderer.setFilters(['exit'], [])
+  windowStub.__raf(1032)
+  check('a filtered-out kind goes dark', state.alpha[exitIdx] === 0, String(state.alpha[exitIdx]))
+  check('other kinds stay lit', state.alpha[retroIdx] > 0.1, String(state.alpha[retroIdx]))
+  renderer.setFilters([], [])
+  windowStub.__raf(1048)
+  check('clearing the kind filter restores the node', state.alpha[exitIdx] > 0.5, String(state.alpha[exitIdx]))
+  const lessonLink = state.linkRoles.findIndex((role) => role === 'lesson')
+  check('a lesson wire is labelled', lessonLink >= 0, String(lessonLink))
+  const lessonAlpha = state.linkAlpha[lessonLink * 2]
+  renderer.setFilters([], ['lesson'])
+  check('a filtered-out wire goes dark', state.linkAlpha[lessonLink * 2] === 0, String(state.linkAlpha[lessonLink * 2]))
+  renderer.setFilters([], [])
+  check('clearing the wire filter restores it', state.linkAlpha[lessonLink * 2] === lessonAlpha)
+
   // A program is a satellite, not another node in the ball: it has to settle outside
   // the error cloud while its links keep it tethered to what it produced.
   let tick = 2000
