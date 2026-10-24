@@ -764,6 +764,11 @@ function createStore(config) {
       byKind[entry.kind] = (byKind[entry.kind] || 0) + entry.count
     }
 
+    // Recurrence is judged against what the graph actually shows, so muting a noisy
+    // signature also stops it from flagging healthy lessons as failed.
+    recordById.clear()
+    for (const entry of visible) recordById.set(entry.id, entry)
+
     const picked = visible.slice(0, config.maxNodes)
     // A retrospective must never point at a node the cap dropped: its lesson edge would
     // vanish and the atlas would quietly claim that every lesson held. Reserve the space.
