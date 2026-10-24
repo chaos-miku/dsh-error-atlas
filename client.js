@@ -204,7 +204,7 @@ const NS = 'error-atlas'
     // Bumped on every client change so the panel itself can prove which bundle is
     // live. The chip next to the title shows it; if it is stale the page is running
     // an older bundle and no amount of editing here will be visible.
-    const BUILD = 'V40'
+    const BUILD = 'V41'
 
     const ZH = {
       nav: '错误星图',
@@ -575,11 +575,14 @@ const NS = 'error-atlas'
       'void main() {',
       '  vec2 p = gl_PointCoord - vec2(0.5);',
       '  float r = length(p) * 2.0;',
-      '  if (r >= 1.0) discard;',
-      '  float edge = smoothstep(1.0, 0.9, r);',
-      '  float lit = 0.62 + 0.38 * (1.0 - r * r);',
+      // The solid core only fills the middle of the sprite: a point-sized dot with a
+      // crisp rim reads as a node, while a disc that fills the whole quad reads as a ball.
+      '  float q = r * 1.75;',
+      '  if (q >= 1.0) discard;',
+      '  float edge = smoothstep(1.0, 0.86, q);',
+      '  float lit = 0.6 + 0.4 * (1.0 - q * q);',
       '  float core = edge * lit;',
-      '  float spark = pow(max(0.0, 1.0 - r * 2.2), 8.0) * 0.5;',
+      '  float spark = pow(max(0.0, 1.0 - q * 2.0), 8.0) * 0.45;',
       '  gl_FragColor = vec4(vColor * (core + spark), vAlpha * edge * 0.9);',
       '}',
     ].join('\n')
@@ -975,8 +978,8 @@ const NS = 'error-atlas'
           size[i] = isRoot
             ? 11
             : isHub
-              ? 5.5 + Math.min(7, Math.sqrt(node.count || 1) * 1.6)
-              : 2.4 + Math.min(4.5, Math.sqrt(node.count || 1) * 1.3)
+              ? 4.2 + Math.min(4.6, Math.sqrt(node.count || 1) * 1.15)
+              : 1.5 + Math.min(2.6, Math.sqrt(node.count || 1) * 0.82)
           if (isRoot) {
             pos[i * 3] = 0
             pos[i * 3 + 1] = 0
@@ -1575,7 +1578,7 @@ const NS = 'error-atlas'
           gl.enableVertexAttribArray(nodeLoc.alpha)
           gl.vertexAttribPointer(nodeLoc.alpha, 1, gl.FLOAT, false, 0, 0)
 
-          gl.uniform1f(nodeLoc.uSizeMul, 1.9 * state.scale)
+          gl.uniform1f(nodeLoc.uSizeMul, 3.2 * state.scale)
           gl.uniform1f(nodeLoc.uAlphaMul, 0.034)
           gl.drawArrays(gl.POINTS, 0, state.count)
 
@@ -2510,7 +2513,7 @@ const NS = 'error-atlas'
       const [scale, setScale] = useState(() => {
         try {
           const raw = Number(window.localStorage.getItem('dsh-error-atlas-scale'))
-          return Number.isFinite(raw) && raw >= 40 && raw <= 240 ? raw : 100
+          return Number.isFinite(raw) && raw >= 20 && raw <= 240 ? raw : 100
         } catch {
           return 100
         }
@@ -2727,7 +2730,7 @@ const NS = 'error-atlas'
       }, [])
 
       const onScale = useCallback((value) => {
-        const next = Math.max(40, Math.min(240, Number(value) || 100))
+        const next = Math.max(20, Math.min(240, Number(value) || 100))
         setScale(next)
         try {
           window.localStorage.setItem('dsh-error-atlas-scale', String(next))
@@ -2974,7 +2977,7 @@ const NS = 'error-atlas'
             h('span', { className: 'dshea-spin-label' }, COPY.scale),
             h('input', {
               type: 'range',
-              min: 40,
+              min: 20,
               max: 240,
               step: 5,
               value: scale,
