@@ -204,7 +204,7 @@ const NS = 'error-atlas'
     // Bumped on every client change so the panel itself can prove which bundle is
     // live. The chip next to the title shows it; if it is stale the page is running
     // an older bundle and no amount of editing here will be visible.
-    const BUILD = 'V48'
+    const BUILD = 'V50'
 
     const ZH = {
       nav: '错误星图',
@@ -250,6 +250,10 @@ const NS = 'error-atlas'
       spread: '间距',
       nodeColors: '节点',
       linkColors: '线条',
+      linkCore: '核心辐条',
+      linkHub: '枢纽辐条',
+      linkProject: '程序系绳',
+      linkLesson: '教训线',
       style: '外观',
       pause: '暂停',
       resume: '继续',
@@ -365,6 +369,10 @@ const NS = 'error-atlas'
       spread: 'Spread',
       nodeColors: 'Nodes',
       linkColors: 'Lines',
+      linkCore: 'Core spokes',
+      linkHub: 'Hub spokes',
+      linkProject: 'Program tethers',
+      linkLesson: 'Lesson wires',
       style: 'Look',
       pause: 'Pause',
       resume: 'Resume',
@@ -1881,7 +1889,7 @@ const NS = 'error-atlas'
           // dim: the islands should be readable before the web around the core is.
           const satelliteEdge = nodes[a].kind === 'project' || nodes[b].kind === 'project'
           const rootSpoke = nodes[a].kind === 'root' || nodes[b].kind === 'root'
-          const alpha = satelliteEdge ? 0.34 : rootSpoke ? 0.07 : 0.2
+          const alpha = satelliteEdge ? 0.34 : rootSpoke ? 0.16 : 0.26
           linkAlpha.push(alpha, alpha)
           linkRoles.push(satelliteEdge ? 'project' : rootSpoke ? 'core' : 'hub')
         }
@@ -2309,9 +2317,10 @@ const NS = 'error-atlas'
 .dshea-actions { display: flex; align-items: center; gap: 7px; }
 .dshea-colors { display: flex; align-items: center; gap: 3px; padding: 2px 6px; border: 1px solid rgba(255, 122, 132, 0.16); border-radius: 999px; }
 .dshea-colors-label { font: 600 8px/1 ui-monospace, monospace; letter-spacing: 0.14em; color: var(--dsw-alias-label-tertiary, #8a8f98); margin-right: 2px; }
+.dshea-colors-count { font: 600 8px/1 ui-monospace, monospace; color: rgba(255, 255, 255, 0.32); margin-right: 2px; }
 .dshea-chip {
-  width: 9px;
-  height: 9px;
+  width: 10px;
+  height: 10px;
   padding: 0;
   border: 1px solid var(--chip);
   border-radius: 50%;
@@ -2320,7 +2329,8 @@ const NS = 'error-atlas'
   cursor: pointer;
   transition: opacity 120ms ease, box-shadow 120ms ease;
 }
-.dshea-chip.is-on { opacity: 1; background: var(--chip); box-shadow: 0 0 6px var(--chip); }
+.dshea-chip.is-on { opacity: 1; background: var(--chip); border-color: var(--chip); box-shadow: 0 0 6px var(--chip); }
+.dshea-chip:not(.is-on) { border-style: dashed; opacity: 0.28; }
 .dshea-chip:hover { opacity: 0.85; }
 .dshea-style {
   display: none;
@@ -3196,13 +3206,14 @@ const NS = 'error-atlas'
           'div',
           { className: 'dshea-colors', title: label },
           h('span', { className: 'dshea-colors-label' }, label),
-          items.map(([value, color]) =>
+          h('span', { className: 'dshea-colors-count' }, items.length - off.length + '/' + items.length),
+          items.map(([value, color, name]) =>
             h('button', {
               key: value,
               type: 'button',
               className: 'dshea-chip' + (off.includes(value) ? '' : ' is-on'),
               style: { '--chip': color },
-              title: value,
+              title: (off.includes(value) ? '✕ ' : '✓ ') + (name || value),
               onClick: () => onToggle(value),
               'aria-pressed': off.includes(value) ? 'false' : 'true',
             }),
@@ -3238,14 +3249,14 @@ const NS = 'error-atlas'
           chipRow(
             COPY.nodeColors,
             [
-              ['agent', '#ff4453'],
-              ['tool', '#ffb570'],
-              ['exit', '#ffd68f'],
-              ['config', '#d89eff'],
-              ['sessionhub', '#ffd9e4'],
-              ['project', '#7fd4ff'],
-              ['dev', '#7ff3e0'],
-              ['retro', '#c7a4ff'],
+              ['agent', '#ff4453', 'AGENT'],
+              ['tool', '#ffb570', 'TOOL'],
+              ['exit', '#ffd68f', 'EXIT'],
+              ['config', '#d89eff', 'CONFIG'],
+              ['sessionhub', '#ffd9e4', 'SESSION'],
+              ['project', '#7fd4ff', 'PROJECT'],
+              ['dev', '#7ff3e0', 'DEV'],
+              ['retro', '#c7a4ff', 'RETRO'],
             ],
             offKinds,
             toggleKind,
@@ -3253,10 +3264,10 @@ const NS = 'error-atlas'
           chipRow(
             COPY.linkColors,
             [
-              ['core', '#7a2b31'],
-              ['hub', '#8a6a4a'],
-              ['project', '#7fd4ff'],
-              ['lesson', '#c7a4ff'],
+              ['core', '#ff6b6b', COPY.linkCore],
+              ['hub', '#ffb570', COPY.linkHub],
+              ['project', '#7fd4ff', COPY.linkProject],
+              ['lesson', '#c7a4ff', COPY.linkLesson],
             ],
             offLinks,
             toggleLink,
