@@ -4,6 +4,15 @@ All notable changes to **dsh-error-atlas**. Versions follow `0.11.x` while the p
 is in the DSH marketplace pipeline; the panel's `V##` chip is the **client bundle** build
 stamp, which only moves when `client.js` changes — a `V51 · 0.11.24` panel is expected.
 
+## 0.11.26
+
+- `atlas_impact` — the read-only tool that says whether the mechanism pays for itself:
+  how many lessons exist, how many can be judged (they name failures still recorded), how
+  many of those were followed by the same failure returning, and how much of the store the
+  lessons cover. Also exposed as `impact` in `/error-atlas/data` so the panel can show it.
+- Real store at release: 59 lessons (49 model · 10 auto), **30 judgeable, 6 recurred (20%),
+  24 held (80%)**, 61% of signatures carry a lesson, 235 failures in the last 30 days.
+
 ## 0.11.25
 
 - Client tests no longer depend on the checkout's line endings: the test seam matches the

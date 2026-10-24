@@ -931,6 +931,61 @@ function createStore(config) {
       return lines.join('\n')
     }
 
+    // What the lessons bought, in numbers that are honest about being proxies: a lesson
+    // counts as "judged" only when it names failures that are still in the store, and only
+    // then can its signatures be watched afterwards. Everything else is bookkeeping.
+    function impactOf(days = 30) {
+      const span = Math.max(1, Math.min(365, Math.floor(days || 30)))
+      const windowMs = span * 24 * 60 * 60 * 1000
+      const since = Date.now() - windowMs
+      const recordById = new Map()
+      for (const entry of state.records.values()) recordById.set(entry.id, entry)
+      const ambient = ambientIds()
+      const linked = new Set()
+      let model = 0
+      let auto = 0
+      let judgeable = 0
+      let failed = 0
+      let firstLessonAt = Infinity
+      for (const retro of state.retros) {
+        if (retro.auto) auto += 1
+        else model += 1
+        if (!retro.auto && Number.isFinite(retro.at) && retro.at < firstLessonAt) firstLessonAt = retro.at
+        const ids = (retro.errorIds || []).filter((id) => recordById.has(id))
+        for (const id of ids) linked.add(id)
+        if (retro.auto || ids.length === 0) continue
+        judgeable += 1
+        const relapse = recurrenceOf(retro, recordById, ambient)
+        if (relapse && relapse.times > 0) failed += 1
+      }
+      let hits = 0
+      let hitsInWindow = 0
+      let afterFirstLesson = 0
+      for (const event of state.log) {
+        hits += 1
+        if (event.at >= since) hitsInWindow += 1
+        if (Number.isFinite(firstLessonAt) && event.at > firstLessonAt) afterFirstLesson += 1
+      }
+      const distinct = state.records.size
+      return {
+        days: span,
+        lessons: model + auto,
+        model,
+        auto,
+        judgeable,
+        failed,
+        held: judgeable - failed,
+        rate: judgeable > 0 ? Math.round((failed / judgeable) * 100) : 0,
+        distinct,
+        withLesson: linked.size,
+        coverage: distinct > 0 ? Math.round((linked.size / distinct) * 100) : 0,
+        hits,
+        hitsInWindow,
+        afterFirstLesson,
+        firstLessonAt: Number.isFinite(firstLessonAt) ? firstLessonAt : 0,
+      }
+    }
+
   function snapshot() {
     const all = [...state.records.values()].sort((a, b) => b.count - a.count || b.last - a.last)
     const recordById = new Map()
@@ -1212,6 +1267,7 @@ function createStore(config) {
       prefs: prefs(),
       trend: trendOf(Date.now()),
       lessons: lessonBoard(),
+      impact: impactOf(30),
       nodes,
       links,
       retros: state.retros.slice(0, config.maxRetros),
@@ -1233,6 +1289,7 @@ function createStore(config) {
     applyPrefs,
     lessonList,
     lessonBriefing,
+    impactOf,
   }
 }
 
@@ -1815,6 +1872,78 @@ export function apply(ctx, config = {}) {
             },
           }),
         'error-atlas: lesson tool',
+      )
+
+      // Whether the mechanism pays for itself: how many lessons exist, how many can be
+      // judged at all, and how many of those had their signatures come back anyway.
+      scope.effect(
+        () =>
+          scope.tools.register({
+            name: 'atlas_impact',
+            description:
+              'Report what the recorded lessons bought: how many exist, how many can be judged (they name failures that are still in the store), how many of those were followed by the same failure returning, and how much of the store the lessons cover. These are counts from the local store, not a controlled experiment.',
+            parameters: {
+              type: 'object',
+              properties: {
+                days: { type: 'number', description: 'Window for the failure counts, 1 to 365; defaults to 30.' },
+              },
+              additionalProperties: false,
+            },
+            output: {
+              schema: {
+                type: 'object',
+                properties: {
+                  days: { type: 'number' },
+                  lessons: { type: 'number' },
+                  model: { type: 'number' },
+                  auto: { type: 'number' },
+                  judgeable: { type: 'number' },
+                  failed: { type: 'number' },
+                  held: { type: 'number' },
+                  rate: { type: 'number' },
+                  distinct: { type: 'number' },
+                  withLesson: { type: 'number' },
+                  coverage: { type: 'number' },
+                  hits: { type: 'number' },
+                  hitsInWindow: { type: 'number' },
+                  afterFirstLesson: { type: 'number' },
+                  firstLessonAt: { type: 'number' },
+                },
+                required: ['days', 'lessons', 'judgeable', 'failed', 'held', 'rate', 'coverage'],
+                additionalProperties: false,
+              },
+              render(_args, value) {
+                if (value.lessons === 0) return [{ type: 'text', text: 'no lessons recorded yet' }]
+                if (value.judgeable === 0) {
+                  return [
+                    {
+                      type: 'text',
+                      text:
+                        value.lessons +
+                        ' lesson(s), none judgeable yet: a lesson is judged only once it names failures that are still recorded',
+                    },
+                  ]
+                }
+                return [
+                  {
+                    type: 'text',
+                    text: [
+                      'impact · ' + value.days + ' day window',
+                      'lessons: ' + value.lessons + ' (' + value.model + ' model · ' + value.auto + ' auto) · ' + value.judgeable + ' judgeable',
+                      'verdict: ' + value.failed + ' of ' + value.judgeable + ' judged lessons recurred (' + value.rate + '% failed · ' + (100 - value.rate) + '% held)',
+                      'coverage: ' + value.withLesson + ' of ' + value.distinct + ' signatures carry a lesson (' + value.coverage + '%)',
+                      'failures: ' + value.hitsInWindow + ' in window · ' + value.afterFirstLesson + ' since the first lesson',
+                    ].join('\n'),
+                  },
+                ]
+              },
+            },
+            execute(args) {
+              const days = Number.isFinite(args.days) ? Math.max(1, Math.min(365, Math.floor(args.days))) : 30
+              return Promise.resolve(store.impactOf(days))
+            },
+          }),
+        'error-atlas: impact tool',
       )
     })
 

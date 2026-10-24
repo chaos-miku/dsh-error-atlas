@@ -823,6 +823,107 @@ async function lessonSection() {
 }
 
 
+// ── impact ─────────────────────────────────────────────────────────────────
+// The number the plugin exists for: of the lessons that can be judged at all, how many
+// had their signatures come back anyway.
+async function impactSection() {
+  section('impact')
+  const home = tempHome('impact')
+  const now = Date.now()
+  const hour = 60 * 60 * 1000
+  const retro = (id, at, errorIds, extra) =>
+    Object.assign(
+      {
+        id,
+        at,
+        auto: false,
+        title: 'task ' + id,
+        done: 'changed',
+        cause: 'c',
+        fix: 'f',
+        lesson: 'lesson ' + id,
+        tags: ['edit'],
+        tools: ['edit'],
+        files: ['C:/work/proj-a/src/a.ts'],
+        cwd: 'C:/work',
+        errors: [],
+        errorIds,
+      },
+      extra || {},
+    )
+  writeFileSync(
+    join(home, 'error-atlas', 'records.json'),
+    JSON.stringify({
+      version: 2,
+      updatedAt: now,
+      records: [
+        {
+          key: 'tool\u0000edit\u0000boom',
+          id: 'e1',
+          kind: 'tool',
+          name: 'edit',
+          message: 'boom',
+          count: 2,
+          first: now - 5 * hour,
+          last: now - 10 * 60 * 1000,
+          sessions: ['s'],
+        },
+        {
+          key: 'tool\u0000pwsh\u0000sunless',
+          id: 'e2',
+          kind: 'tool',
+          name: 'pwsh',
+          message: 'no lesson here',
+          count: 1,
+          first: now - 4 * hour,
+          last: now - 4 * hour,
+          sessions: ['s'],
+        },
+      ],
+      log: [
+        { at: now - 10 * 60 * 1000, kind: 'tool', name: 'edit', message: 'boom', sessionId: 's' },
+        { at: now - 4 * hour, kind: 'tool', name: 'pwsh', message: 'no lesson here', sessionId: 's' },
+        { at: now - 40 * 24 * hour, kind: 'tool', name: 'edit', message: 'ancient', sessionId: 's' },
+      ],
+      retros: [
+        retro('r1', now - 3 * hour, ['e1']),
+        retro('r2', now - 2 * hour, []),
+        retro('r3', now - hour, [], { auto: true }),
+      ],
+    }),
+  )
+
+  const host = await bootHost(home)
+  const tool = host.tools.find((item) => item.name === 'atlas_impact')
+  check('the impact tool is registered', Boolean(tool))
+  if (!tool) return
+
+  const impact = await tool.execute({})
+  eq('every retrospective is counted', impact.lessons, 3)
+  eq('model retrospectives are separated', impact.model, 2)
+  eq('auto skeletons are separated', impact.auto, 1)
+  eq('only lessons that name a live failure are judgeable', impact.judgeable, 1)
+  eq('a lesson whose failure came back counts as failed', impact.failed, 1)
+  eq('nothing was held against the only judged lesson', impact.held, 0)
+  eq('the failure rate is a percentage', impact.rate, 100)
+  eq('the store size is reported', impact.distinct, 2)
+  eq('coverage counts signatures with a lesson', impact.withLesson, 1)
+  eq('coverage is a percentage', impact.coverage, 50)
+  eq('the failure log is counted', impact.hits, 3)
+  eq('the window keeps the old failure out', impact.hitsInWindow, 2)
+  check('failures after the first lesson are counted', impact.afterFirstLesson >= 1, String(impact.afterFirstLesson))
+  eq('the default window is 30 days', impact.days, 30)
+  eq('a shorter window is honoured', (await tool.execute({ days: 1 })).days, 1)
+  eq('a silly window is clamped', (await tool.execute({ days: 9999 })).days, 365)
+
+  const text = tool.output.render({}, impact)[0].text
+  check('the rendered impact reads like a report', text.includes('judged lessons recurred'), text.slice(0, 120))
+  check('the rendered impact reports coverage', text.includes('carry a lesson'))
+
+  const payload = (await host.call('/error-atlas/data')).json
+  eq('the panel payload carries the same numbers', payload.impact ? payload.impact.judgeable : -1, 1)
+}
+
 // ── board ──────────────────────────────────────────────────────────────────
 // The effectiveness leaderboard: a lesson library is only useful if the reader can see
 // which kinds of lesson keep failing without opening every entry.
@@ -1034,7 +1135,7 @@ async function noiseSection() {
 }
 
 // ── run ────────────────────────────────────────────────────────────────────
-const sections = [storeSection, retroSection, prefsSection, trendSection, projectSection, exportSection, lessonSection, noiseSection, boardSection, clientSection, capSection, manifestSection]
+const sections = [storeSection, retroSection, prefsSection, trendSection, projectSection, exportSection, lessonSection, noiseSection, impactSection, boardSection, clientSection, capSection, manifestSection]
 for (const run of sections) {
   try {
     await run()
