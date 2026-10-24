@@ -204,7 +204,7 @@ const NS = 'error-atlas'
     // Bumped on every client change so the panel itself can prove which bundle is
     // live. The chip next to the title shows it; if it is stale the page is running
     // an older bundle and no amount of editing here will be visible.
-    const BUILD = 'V41'
+    const BUILD = 'V42'
 
     const ZH = {
       nav: '错误星图',
@@ -561,7 +561,7 @@ const NS = 'error-atlas'
       '  vec4 clip = uVP * vec4(aPosition, 1.0);',
       '  gl_Position = clip;',
       '  float w = max(0.01, clip.w);',
-      '  gl_PointSize = max(1.5, aSize * uSizeMul * uFocal / w);',
+      '  gl_PointSize = clamp(aSize * uSizeMul * uFocal / w, 1.5, 44.0);',
       '  float fog = clamp(2.4 - w * 0.009, 0.08, 1.0);',
       '  vAlpha = aAlpha * uAlphaMul * fog;',
       '  vColor = aColor;',
@@ -2048,7 +2048,7 @@ const NS = 'error-atlas'
         // Test hook only: lets a headless harness inspect the live render state.
         __state: () => state,
                 setScale(value) {
-          state.scale = Math.max(0.4, Math.min(2.4, Number(value) || 1))
+          state.scale = Math.max(0.08, Math.min(3, Number(value) || 1))
         },
 
         setSpin(value) {
@@ -2513,7 +2513,7 @@ const NS = 'error-atlas'
       const [scale, setScale] = useState(() => {
         try {
           const raw = Number(window.localStorage.getItem('dsh-error-atlas-scale'))
-          return Number.isFinite(raw) && raw >= 20 && raw <= 240 ? raw : 100
+          return Number.isFinite(raw) && raw >= 10 && raw <= 300 ? raw : 100
         } catch {
           return 100
         }
@@ -2730,7 +2730,7 @@ const NS = 'error-atlas'
       }, [])
 
       const onScale = useCallback((value) => {
-        const next = Math.max(20, Math.min(240, Number(value) || 100))
+        const next = Math.max(10, Math.min(300, Number(value) || 100))
         setScale(next)
         try {
           window.localStorage.setItem('dsh-error-atlas-scale', String(next))
@@ -2977,8 +2977,8 @@ const NS = 'error-atlas'
             h('span', { className: 'dshea-spin-label' }, COPY.scale),
             h('input', {
               type: 'range',
-              min: 20,
-              max: 240,
+              min: 10,
+              max: 300,
               step: 5,
               value: scale,
               className: 'dshea-range',
