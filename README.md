@@ -6,7 +6,7 @@
 
 ![错误星图面板](https://raw.githubusercontent.com/chaos-miku/dsh-error-atlas/main/docs/screenshot.jpg)
 
-*面板实拍：顶部是统计与操作，左侧是颜色图例，中间是 GPU 渲染的错误星系，底部是「记忆」开关、教训有效性榜单与最近事件表。标题旁的 `V33` 是 build 号，用来确认页面跑的是哪一代客户端代码。*
+*面板实拍：顶部是统计与操作，左侧是颜色图例，中间是 GPU 渲染的错误星系，底部是「记忆」开关、教训有效性榜单与最近事件表。标题旁的 `V##` 是客户端 build 号，用来确认页面跑的是哪一代代码（截图拍的是 `V33`，当前是 `V51`）。*
 
 A local-first memory plugin for DeepSeek Harness: it records runtime failures and
 coding-task retrospectives, injects the reusable lessons back into the prompt, and
@@ -125,7 +125,7 @@ DSH 报过的错、踩过的坑，默认会随会话结束消失。这个插件�
 plugin_manager install_bundle target="dsh-error-atlas"
 ```
 
-指定版本：`target="dsh-error-atlas@0.11.4"`。
+指定版本：`target="dsh-error-atlas@0.11.25"`。
 
 本地目录安装（开发用）：
 
@@ -180,7 +180,7 @@ npm test        # 157 项断言：宿主事件/路由/存储 + 客户端渲染�
 npm run smoke   # 干净 DSH_HOME 下的冷启动冒烟：空库 → 写复盘 → 读回 → CLI 可读
 ```
 
-客户端为零依赖手写 bundle（`window.__ModuleLoader__`），宿主为纯 ESM。面板标题旁的 `V30`/`V35`… 是 BUILD 号，用来确认页面加载的是哪一代客户端代码。
+客户端为零依赖手写 bundle（`window.__ModuleLoader__`），宿主为纯 ESM。面板标题旁的 `V51` 就是 BUILD 号，用来确认页面加载的是哪一代客户端代码。
 
 ## 已知边界
 
