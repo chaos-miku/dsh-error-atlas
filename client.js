@@ -204,7 +204,7 @@ const NS = 'error-atlas'
     // Bumped on every client change so the panel itself can prove which bundle is
     // live. The chip next to the title shows it; if it is stale the page is running
     // an older bundle and no amount of editing here will be visible.
-    const BUILD = 'V43'
+    const BUILD = 'V44'
 
     const ZH = {
       nav: '错误星图',
@@ -553,6 +553,7 @@ const NS = 'error-atlas'
       'attribute float aAlpha;',
       'uniform mat4 uVP;',
       'uniform float uFocal;',
+      'uniform float uRefDist;',
       'uniform float uSizeMul;',
       'uniform float uAlphaMul;',
       'varying vec3 vColor;',
@@ -561,7 +562,7 @@ const NS = 'error-atlas'
       '  vec4 clip = uVP * vec4(aPosition, 1.0);',
       '  gl_Position = clip;',
       '  float w = max(0.01, clip.w);',
-      '  gl_PointSize = clamp(aSize * uSizeMul * uFocal / w, 1.5, 44.0);',
+      '  gl_PointSize = clamp(aSize * uSizeMul * uFocal / max(uRefDist, 1.0), 1.5, 44.0);',
       '  float fog = clamp(2.4 - w * 0.009, 0.08, 1.0);',
       '  vAlpha = aAlpha * uAlphaMul * fog;',
       '  vColor = aColor;',
@@ -717,6 +718,7 @@ const NS = 'error-atlas'
         alpha: gl.getAttribLocation(nodeProgram, 'aAlpha'),
         uVP: gl.getUniformLocation(nodeProgram, 'uVP'),
         uFocal: gl.getUniformLocation(nodeProgram, 'uFocal'),
+        uRefDist: gl.getUniformLocation(nodeProgram, 'uRefDist'),
         uSizeMul: gl.getUniformLocation(nodeProgram, 'uSizeMul'),
         uAlphaMul: gl.getUniformLocation(nodeProgram, 'uAlphaMul'),
       }
@@ -1543,6 +1545,7 @@ const NS = 'error-atlas'
           gl.useProgram(nodeProgram)
           gl.uniformMatrix4fv(nodeLoc.uVP, false, vp)
           gl.uniform1f(nodeLoc.uFocal, focalDevice)
+          gl.uniform1f(nodeLoc.uRefDist, state.fitDist || 96)
           gl.uniform1f(nodeLoc.uSizeMul, Math.max(0.5, state.scale))
           gl.uniform1f(nodeLoc.uAlphaMul, 1.0)
           gl.bindBuffer(gl.ARRAY_BUFFER, flowBuffers.position)
@@ -1565,6 +1568,7 @@ const NS = 'error-atlas'
           gl.useProgram(nodeProgram)
           gl.uniformMatrix4fv(nodeLoc.uVP, false, vp)
           gl.uniform1f(nodeLoc.uFocal, focalDevice)
+          gl.uniform1f(nodeLoc.uRefDist, state.fitDist || 96)
           gl.bindBuffer(gl.ARRAY_BUFFER, nodeBuffers.position)
           gl.enableVertexAttribArray(nodeLoc.position)
           gl.vertexAttribPointer(nodeLoc.position, 3, gl.FLOAT, false, 0, 0)
