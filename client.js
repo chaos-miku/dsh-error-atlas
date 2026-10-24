@@ -204,7 +204,7 @@ const NS = 'error-atlas'
     // Bumped on every client change so the panel itself can prove which bundle is
     // live. The chip next to the title shows it; if it is stale the page is running
     // an older bundle and no amount of editing here will be visible.
-    const BUILD = 'V46'
+    const BUILD = 'V47'
 
     const ZH = {
       nav: '错误星图',
@@ -247,6 +247,7 @@ const NS = 'error-atlas'
       scale: '大小',
       halo: '光晕',
       flow: '光点',
+      spread: '间距',
       style: '外观',
       pause: '暂停',
       resume: '继续',
@@ -359,6 +360,7 @@ const NS = 'error-atlas'
       scale: 'Size',
       halo: 'Glow',
       flow: 'Pulse',
+      spread: 'Spread',
       style: 'Look',
       pause: 'Pause',
       resume: 'Resume',
@@ -825,6 +827,9 @@ const NS = 'error-atlas'
         scale: 1,
         halo: 1,
         flowScale: 1,
+        // How far apart the nodes sit. Positions only: node and pulse diameters keep
+        // their own dials, so the wire lengths can breathe without resizing anything.
+        spread: 1,
         focus: new Float32Array(3),
         focusTarget: new Float32Array(3),
         selected: null,
@@ -1355,6 +1360,26 @@ const NS = 'error-atlas'
       }
 
       /** Frame the whole cloud, so nothing starts outside the viewport. */
+      function scaling(out, k) {
+        out[0] = k
+        out[1] = 0
+        out[2] = 0
+        out[3] = 0
+        out[4] = 0
+        out[5] = k
+        out[6] = 0
+        out[7] = 0
+        out[8] = 0
+        out[9] = 0
+        out[10] = k
+        out[11] = 0
+        out[12] = 0
+        out[13] = 0
+        out[14] = 0
+        out[15] = 1
+        return out
+      }
+
       function fitView() {
         const n = state.count
         if (n === 0) return
@@ -1368,7 +1393,7 @@ const NS = 'error-atlas'
         const width = Math.max(1, canvas.clientWidth || 900)
         const height = Math.max(1, canvas.clientHeight || 600)
         const focal = 0.5 * height / Math.tan(FOV / 2)
-        const fitted = (maxR * 1.32 * focal) / (Math.min(width, height) * 0.4)
+        const fitted = (maxR * state.spread * 1.32 * focal) / (Math.min(width, height) * 0.4)
         const dist = Math.max(48, Math.min(300, fitted))
         state.dist = dist
         state.targetDist = dist
@@ -1391,6 +1416,10 @@ const NS = 'error-atlas'
         const focus = translation(new Float32Array(16), -state.focus[0], -state.focus[1], -state.focus[2])
         const centred = new Float32Array(16)
         multiply(centred, spin, focus)
+        // Spreading is a pure scale about the orbit centre: after the focus translation
+        // the centre is the origin, so scaling here widens every wire without moving
+        // the node the camera is circling.
+        multiply(centred, scaling(new Float32Array(16), state.spread), centred)
         const t = translation(new Float32Array(16), 0, 0, -state.dist)
         multiply(view, t, centred)
         const vp = new Float32Array(16)
@@ -2143,6 +2172,10 @@ const NS = 'error-atlas'
           state.flowScale = Math.max(0.2, Math.min(4, Number(value) || 1))
         },
 
+        setSpread(value) {
+          state.spread = Math.max(0.35, Math.min(2.4, Number(value) || 1))
+        },
+
         setSpin(value) {
           const next = Number(value)
           if (!Number.isFinite(next)) return
@@ -2636,6 +2669,14 @@ const NS = 'error-atlas'
           return 100
         }
       })
+      const [spread, setSpread] = useState(() => {
+        try {
+          const raw = Number(window.localStorage.getItem('dsh-error-atlas-spread'))
+          return Number.isFinite(raw) && raw >= 35 && raw <= 240 ? raw : 100
+        } catch {
+          return 100
+        }
+      })
       const [styleOpen, setStyleOpen] = useState(false)
       const [halo, setHalo] = useState(() => {
         try {
@@ -2826,6 +2867,7 @@ const NS = 'error-atlas'
           if (renderer) renderer.setScale(scale / 100)
           if (renderer) renderer.setHalo(halo / 100)
           if (renderer) renderer.setFlowScale(flowScale / 100)
+          if (renderer) renderer.setSpread(spread / 100)
       }, [spin])
 
       useEffect(() => {
@@ -2856,6 +2898,17 @@ const NS = 'error-atlas'
         const renderer = rendererRef.current
         if (renderer) renderer.setPaused(next)
         setPaused(next)
+      }, [])
+
+      const onSpread = useCallback((value) => {
+        const next = Math.max(35, Math.min(240, Number(value) || 100))
+        setSpread(next)
+        try {
+          window.localStorage.setItem('dsh-error-atlas-spread', String(next))
+        } catch {
+          /* storage is best effort */
+        }
+        if (rendererRef.current) rendererRef.current.setSpread(next / 100)
       }, [])
 
       const onFlowScale = useCallback((value) => {
@@ -3200,6 +3253,22 @@ const NS = 'error-atlas'
               }),
               h('span', { className: 'dshea-spin-value' }, Math.round(halo) + '%'),
             ),
+        h(
+          'label',
+          { className: 'dshea-spin dshea-spread' },
+          h('span', { className: 'dshea-spin-label' }, COPY.spread),
+          h('input', {
+            type: 'range',
+            min: 35,
+            max: 240,
+            step: 5,
+            value: spread,
+            className: 'dshea-range',
+            onChange: (event) => onSpread(event.target.value),
+            onInput: (event) => onSpread(event.target.value),
+          }),
+          h('span', { className: 'dshea-spin-value' }, Math.round(spread) + '%'),
+        ),
         h(
           'label',
           { className: 'dshea-spin dshea-flow' },
