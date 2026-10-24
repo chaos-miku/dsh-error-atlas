@@ -133,16 +133,28 @@ const GRACE_MS = 90 * 1000
 const byId = new Map(records.map((r) => [r.id, r]))
 const signature = (entry) => entry.kind + '\u0000' + entry.name + '\u0000' + entry.message
 
+// A signature many lessons point at is ambient environment noise (a shell quirk), not the
+// mistake a single lesson was about; and a bare repeat without stderr carries no evidence.
+const AMBIENT_REFS = 4
+const refCount = new Map()
+for (const retro of retros) {
+  for (const id of retro.errorIds || []) refCount.set(id, (refCount.get(id) || 0) + 1)
+}
+const bareExit = (entry) => entry.kind === 'exit' && (entry.count || 0) >= 5 && String(entry.message || '').split(' · ').length < 3
+
 function recurrenceOf(retro) {
   const ids = Array.isArray(retro.errorIds) ? retro.errorIds : []
   if (ids.length === 0) return null
   const cutoff = (Number(retro.at) || 0) + GRACE_MS
   const keys = new Set()
+  const used = []
   let lastAt = 0
   for (const id of ids) {
+    if ((refCount.get(id) || 0) >= AMBIENT_REFS) continue
     const entry = byId.get(id)
-    if (!entry) continue
+    if (!entry || bareExit(entry)) continue
     keys.add(signature(entry))
+    used.push(entry)
     if ((entry.last || 0) > cutoff) lastAt = Math.max(lastAt, entry.last)
   }
   if (keys.size === 0) return null
@@ -156,10 +168,7 @@ function recurrenceOf(retro) {
   // The log is capped; an aggregate `last` beyond the cutoff still proves a relapse.
   if (times === 0 && lastAt > 0) times = 1
   if (times === 0) return null
-  const errors = ids
-    .map((id) => byId.get(id))
-    .filter(Boolean)
-    .map((entry) => ({ kind: entry.kind, name: entry.name, message: entry.message, count: entry.count }))
+  const errors = used.map((entry) => ({ kind: entry.kind, name: entry.name, message: entry.message, count: entry.count }))
   return { times, lastAt, errors }
 }
 

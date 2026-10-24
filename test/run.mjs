@@ -748,7 +748,7 @@ async function lessonSection() {
       retros: [
         {
           id: 'r1',
-          at: now - hour,
+          at: now - 60 * 60 * 1000,
           auto: false,
           title: 'fix boom',
           done: 'edited src/x.ts',
@@ -994,6 +994,37 @@ async function noiseSection() {
   check('and not the essay', !/essay-length lesson/.test(text), 'leaked the essay')
   check('a missing essence is derived as a rule', /规则：/.test(text), text.slice(0, 300))
   check('the briefing stays under three lessons', (text.match(/^- /gm) || []).length <= 3, text)
+
+  // Ambient churn must not invalidate every lesson that ran beside it: a signature many
+  // lessons point at is the environment, not the mistake any one of them was about.
+  const ambientHome = tempHome('ambient')
+  const now = Date.now()
+  writeFileSync(
+    join(ambientHome, 'error-atlas', 'records.json'),
+    JSON.stringify({
+      version: 3,
+      updatedAt: now,
+      records: [
+        { key: 'k1', id: 'e1', kind: 'pwsh', name: 'git', message: 'git -c', count: 40, first: now - 3 * 60 * 60 * 1000, last: now + 30 * 1000, sessions: ['s'], turn: 1, step: 1 },
+      ],
+      log: [{ at: now + 30 * 1000, kind: 'pwsh', name: 'git', message: 'git -c', sessionId: 's' }],
+      retros: Array.from({ length: 5 }, (_, index) => ({
+        id: 'r' + (index + 1),
+        at: now - 60 * 60 * 1000,
+        auto: false,
+        title: 'lesson ' + (index + 1),
+        lesson: 'do the thing differently',
+        errorIds: ['e1'],
+        tags: ['git'],
+        tools: ['pwsh'],
+        files: [],
+      })),
+    }),
+  )
+  const ambientHost = await bootHost(ambientHome)
+  const ambientTool = ambientHost.tools.find((item) => item.name === 'atlas_lessons')
+  const ambientLessons = await ambientTool.execute({})
+  eq('an ambient signature does not mark lessons stale', ambientLessons.lessons.filter((item) => item.stale > 0).length, 0)
 }
 
 // ── run ────────────────────────────────────────────────────────────────────

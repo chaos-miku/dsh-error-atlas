@@ -754,20 +754,40 @@ function createStore(config) {
     save()
   }
 
+  /**
+   * A signature that many lessons point at is ambient environment noise — a quirk of the
+   * shell, not the mistake any single lesson was about. Its recurrence must not invalidate
+   * every lesson that happened to run in the same turn.
+   */
+  const AMBIENT_REFS = 4
+
+  function ambientIds() {
+    const counts = new Map()
+    for (const retro of state.retros) {
+      for (const id of retro.errorIds || []) counts.set(id, (counts.get(id) || 0) + 1)
+    }
+    const ambient = new Set()
+    for (const [id, count] of counts) {
+      if (count >= AMBIENT_REFS) ambient.add(id)
+    }
+    return ambient
+  }
+
   // A lesson can fail. When the very error a retrospective learned from shows up again
   // after the lesson was written, the lesson did not hold. The failure that produced the
   // retrospective is excluded by a grace window so a lesson never counts as its own relapse.
   const RETRO_GRACE_MS = 90 * 1000
 
-  function recurrenceOf(retro, recordById) {
+  function recurrenceOf(retro, recordById, ambient) {
     const ids = Array.isArray(retro.errorIds) ? retro.errorIds : []
     if (ids.length === 0) return null
     const cutoff = (Number(retro.at) || 0) + RETRO_GRACE_MS
     const keys = new Set()
     let lastAt = 0
     for (const id of ids) {
+      if (ambient && ambient.has(id)) continue
       const entry = recordById.get(id)
-      if (!entry) continue
+      if (!entry || isBareExit(entry)) continue
       keys.add(entry.key)
       if (entry.last > cutoff) lastAt = Math.max(lastAt, entry.last)
     }
@@ -829,9 +849,10 @@ function createStore(config) {
       const needle = typeof query === 'string' ? query.trim().toLowerCase() : ''
       const recordById = new Map()
       for (const entry of state.records.values()) recordById.set(entry.id, entry)
+      const ambient = ambientIds()
       const lessons = []
       for (const retro of state.retros) {
-        const relapse = recurrenceOf(retro, recordById)
+        const relapse = recurrenceOf(retro, recordById, ambient)
         const programs = []
         for (const file of retro.files || []) {
           const project = projectOf(file, retro.cwd)
@@ -914,6 +935,7 @@ function createStore(config) {
     const all = [...state.records.values()].sort((a, b) => b.count - a.count || b.last - a.last)
     const recordById = new Map()
     for (const entry of all) recordById.set(entry.id, entry)
+    const ambient = ambientIds()
     // Muted signatures still feed relapse detection (a lesson that failed on a noisy
     // command is still a failed lesson), they just do not become nodes.
     const noisy = all.filter((entry) => isBareExit(entry))
@@ -1055,7 +1077,7 @@ function createStore(config) {
     // anchored to the DSH core like every other leaf.
     const retroNodes = []
     for (const retro of state.retros.slice(0, config.maxRetros)) {
-      const relapse = recurrenceOf(retro, recordById)
+      const relapse = recurrenceOf(retro, recordById, ambient)
       retroNodes.push({
         id: 'rt:' + retro.id,
         kind: 'retro',
@@ -1110,6 +1132,7 @@ function createStore(config) {
     function lessonBoard() {
       const recordById = new Map()
       for (const entry of state.records.values()) recordById.set(entry.id, entry)
+      const ambient = ambientIds()
       const tags = new Map()
       const programs = new Map()
       const failedRows = []
@@ -1121,7 +1144,7 @@ function createStore(config) {
         bucket.set(name, cell)
       }
       for (const retro of state.retros) {
-        const relapse = recurrenceOf(retro, recordById)
+        const relapse = recurrenceOf(retro, recordById, ambient)
         const stale = relapse ? relapse.times : 0
         total += 1
         const retroPrograms = []
