@@ -2,7 +2,7 @@
 
 把 DSH 自己的运行错误和每个编程任务的复盘，沉淀成一张可以被**人看见**、也可以被**模型读到**的记忆图谱。
 
-![错误星图面板](docs/screenshot.jpg)
+![错误星图面板](https://raw.githubusercontent.com/chaos-miku/dsh-error-atlas/main/docs/screenshot.jpg)
 
 *面板实拍：顶部是统计与操作，左侧是颜色图例，中间是 GPU 渲染的错误星系，底部是「记忆」开关、教训有效性榜单与最近事件表。标题旁的 `V33` 是 build 号，用来确认页面跑的是哪一代客户端代码。*
 
