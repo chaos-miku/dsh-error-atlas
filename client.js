@@ -204,7 +204,7 @@ const NS = 'error-atlas'
     // Bumped on every client change so the panel itself can prove which bundle is
     // live. The chip next to the title shows it; if it is stale the page is running
     // an older bundle and no amount of editing here will be visible.
-    const BUILD = 'V39'
+    const BUILD = 'V40'
 
     const ZH = {
       nav: '错误星图',
@@ -244,6 +244,7 @@ const NS = 'error-atlas'
       exported: '已导出',
       exportFailed: '导出失败',
       spin: '自转',
+      scale: '大小',
       pause: '暂停',
       resume: '继续',
       clear: '清空',
@@ -352,6 +353,7 @@ const NS = 'error-atlas'
       exported: 'Exported',
       exportFailed: 'Export failed',
       spin: 'Spin',
+      scale: 'Size',
       pause: 'Pause',
       resume: 'Resume',
       clear: 'Clear',
@@ -574,9 +576,11 @@ const NS = 'error-atlas'
       '  vec2 p = gl_PointCoord - vec2(0.5);',
       '  float r = length(p) * 2.0;',
       '  if (r >= 1.0) discard;',
-      '  float core = pow(1.0 - r, 2.25);',
-      '  float spark = pow(max(0.0, 1.0 - r * 1.9), 6.0);',
-      '  gl_FragColor = vec4(vColor * (core * 0.7 + spark * 0.9), vAlpha * core * 0.74);',
+      '  float edge = smoothstep(1.0, 0.9, r);',
+      '  float lit = 0.62 + 0.38 * (1.0 - r * r);',
+      '  float core = edge * lit;',
+      '  float spark = pow(max(0.0, 1.0 - r * 2.2), 8.0) * 0.5;',
+      '  gl_FragColor = vec4(vColor * (core + spark), vAlpha * edge * 0.9);',
       '}',
     ].join('\n')
 
@@ -776,6 +780,7 @@ const NS = 'error-atlas'
         pitch: -0.14,
         dist: 96,
         targetDist: 96,
+        scale: 1,
         focus: new Float32Array(3),
         focusTarget: new Float32Array(3),
         selected: null,
@@ -1376,7 +1381,7 @@ const NS = 'error-atlas'
           depth[i] = cw
           sx[i] = (cx / cw * 0.5 + 0.5) * width
           sy[i] = (0.5 - cy / cw * 0.5) * height
-          radii[i] = (state.size[i] * focal) / cw * 0.5 + 2
+          radii[i] = (state.size[i] * state.scale * focal) / cw * 0.5 + 2
         }
       }
 
@@ -1570,11 +1575,11 @@ const NS = 'error-atlas'
           gl.enableVertexAttribArray(nodeLoc.alpha)
           gl.vertexAttribPointer(nodeLoc.alpha, 1, gl.FLOAT, false, 0, 0)
 
-          gl.uniform1f(nodeLoc.uSizeMul, 2.2)
-          gl.uniform1f(nodeLoc.uAlphaMul, 0.042)
+          gl.uniform1f(nodeLoc.uSizeMul, 1.9 * state.scale)
+          gl.uniform1f(nodeLoc.uAlphaMul, 0.034)
           gl.drawArrays(gl.POINTS, 0, state.count)
 
-          gl.uniform1f(nodeLoc.uSizeMul, 1.0)
+          gl.uniform1f(nodeLoc.uSizeMul, state.scale)
           gl.uniform1f(nodeLoc.uAlphaMul, 0.95)
           gl.drawArrays(gl.POINTS, 0, state.count)
         }
@@ -2039,6 +2044,10 @@ const NS = 'error-atlas'
         relayout,
         // Test hook only: lets a headless harness inspect the live render state.
         __state: () => state,
+                setScale(value) {
+          state.scale = Math.max(0.4, Math.min(2.4, Number(value) || 1))
+        },
+
         setSpin(value) {
           const next = Number(value)
           if (!Number.isFinite(next)) return
@@ -2498,6 +2507,14 @@ const NS = 'error-atlas'
       const [focusedLabel, setFocusedLabel] = useState(null)
       const [hoveredNode, setHoveredNode] = useState(null)
       const [showLog, setShowLog] = useState(true)
+      const [scale, setScale] = useState(() => {
+        try {
+          const raw = Number(window.localStorage.getItem('dsh-error-atlas-scale'))
+          return Number.isFinite(raw) && raw >= 40 && raw <= 240 ? raw : 100
+        } catch {
+          return 100
+        }
+      })
       const [spin, setSpin] = useState(() => {
         try {
           const saved = Number(window.localStorage.getItem('dsh-error-atlas-spin'))
@@ -2676,6 +2693,7 @@ const NS = 'error-atlas'
       useEffect(() => {
         const renderer = rendererRef.current
         if (renderer) renderer.setSpin(spin / 100)
+          if (renderer) renderer.setScale(scale / 100)
       }, [spin])
 
       useEffect(() => {
@@ -2706,6 +2724,17 @@ const NS = 'error-atlas'
         const renderer = rendererRef.current
         if (renderer) renderer.setPaused(next)
         setPaused(next)
+      }, [])
+
+      const onScale = useCallback((value) => {
+        const next = Math.max(40, Math.min(240, Number(value) || 100))
+        setScale(next)
+        try {
+          window.localStorage.setItem('dsh-error-atlas-scale', String(next))
+        } catch {
+          /* storage is best effort */
+        }
+        if (rendererRef.current) rendererRef.current.setScale(next / 100)
       }, [])
 
       const onSpin = useCallback((value) => {
@@ -2938,6 +2967,22 @@ const NS = 'error-atlas'
             }),
             h('span', { className: 'dshea-spin-value' }, Math.round(spin) + '%'),
             h('span', { className: 'dshea-spin-rate' }, rateLabel),
+          ),
+          h(
+            'label',
+            { className: 'dshea-spin dshea-size' },
+            h('span', { className: 'dshea-spin-label' }, COPY.scale),
+            h('input', {
+              type: 'range',
+              min: 40,
+              max: 240,
+              step: 5,
+              value: scale,
+              className: 'dshea-range',
+              onChange: (event) => onScale(event.target.value),
+              onInput: (event) => onScale(event.target.value),
+            }),
+            h('span', { className: 'dshea-spin-value' }, Math.round(scale) + '%'),
           ),
           h(
             'label',

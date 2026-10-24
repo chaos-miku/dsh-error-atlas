@@ -521,6 +521,8 @@ async function clientSection() {
   check('a clean tag uses the calm bar', html.includes('dshea-board-fill is-clean'))
   check('the canvas is mounted', html.includes('dshea-canvas'))
   check('the label switch renders', html.includes('dshea-caption'))
+  check('the size dial renders', html.includes('dshea-size') && html.includes('大小'))
+  eq('the header carries both dials', (html.match(/type="range"/g) || []).length, 2)
   check('the label switch is not the label overlay', !html.includes('dshea-btn dshea-labels'))
   check('the header draws no fill', /\.dshea-header \{[^}]*background: transparent;/.test(RAW))
   check('the paused hint is not shown by default', !html.includes('已暂停'))
