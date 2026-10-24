@@ -45,8 +45,8 @@
     "docs/*.jpg"
   ],
   "bin": {
-    "atlas-retro": "./bin/atlas-retro.mjs",
-    "atlas-digest": "./bin/atlas-digest.mjs"
+    "atlas-retro": "bin/atlas-retro.mjs",
+    "atlas-digest": "bin/atlas-digest.mjs"
   },
   "scripts": {
     "test": "node test/run.mjs",
