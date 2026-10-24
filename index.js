@@ -33,9 +33,9 @@ import { dirname, join } from 'node:path'
 export const name = 'error-atlas'
 
 const DEFAULTS = {
-  maxRecords: 1200,
-  maxLog: 400,
-  maxNodes: 240,
+  maxRecords: 4000,
+  maxLog: 2000,
+  maxNodes: 2400,
   maxRetros: 200,
   messageChars: 260,
   retroChars: 420,

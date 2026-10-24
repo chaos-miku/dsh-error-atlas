@@ -31,7 +31,7 @@ function eq(name, actual, expected) {
 }
 
 // ── harness ────────────────────────────────────────────────────────────────
-async function bootHost(home) {
+async function bootHost(home, config = {}) {
   process.env.DSH_HOME = home
   const mod = await import('file://' + HOST.replace(/\\/g, '/') + '?t=' + Math.random())
   const handlers = new Map()
@@ -75,7 +75,7 @@ async function bootHost(home) {
         fn()
       },
     },
-    {},
+    config,
   )
   const fire = (event, ...args) => {
     for (const fn of handlers.get(event) || []) fn(...args)
@@ -381,7 +381,7 @@ async function clientSection() {
   const RAW = readFileSync(CLIENT, 'utf8')
   const SRC = RAW.replace(
     "    return {\n      inject: ['slots'],",
-    "    return {\n      __debug: { createRenderer, isHubNode, withDev },\n      inject: ['slots'],",
+    "    return {\n      __debug: { createRenderer, isHubNode, withDev, cloudRadiusFor },\n      inject: ['slots'],",
   ).replace('useState(() => withDev(null))', 'useState(() => withDev(window.__ATLAS_SEED__))')
   check('the test seam is present', SRC.includes('__debug'))
 
@@ -551,6 +551,88 @@ async function clientSection() {
   renderer.setLabels(true)
   check('the label switch brings the captions back', labelElement.style.display === '' && state.showLabels === true)
   check('a program is a hub', module.__debug.isHubNode('project') === true)
+
+  // A program is a satellite, not another node in the ball: it has to settle outside
+  // the error cloud while its links keep it tethered to what it produced.
+  let tick = 2000
+  for (let f = 0; f < 120; f += 1) {
+    tick += 16.7
+    if (typeof windowStub.__raf !== 'function') break
+    const frame = windowStub.__raf
+    windowStub.__raf = null
+    frame(tick)
+  }
+  const radiusOf = (id) => {
+    const i = index.get(id)
+    return Math.hypot(state.pos[i * 3], state.pos[i * 3 + 1], state.pos[i * 3 + 2])
+  }
+  const projectRadius = radiusOf('p:app')
+  const maxErrorRadius = Math.max(radiusOf('e:e1'), radiusOf('e:e2'))
+  check('a program orbits outside the cloud', projectRadius > 45, projectRadius.toFixed(1))
+  check('a program clears the errors it came from', projectRadius > maxErrorRadius + 4, projectRadius.toFixed(1) + ' vs ' + maxErrorRadius.toFixed(1))
+  check('the tether survives the orbit', state.links.some((link) => link.a === index.get('e:e1') && link.b === index.get('p:app')))
+
+  // The stage grows with the atlas: 2400 failures need a wider cloud, or the islands
+  // collapse back into one ball.
+  check('a small atlas keeps the old stage', module.__debug.cloudRadiusFor(240) === 34, String(module.__debug.cloudRadiusFor(240)))
+  check('a large atlas widens the stage', module.__debug.cloudRadiusFor(2400) > 3 * 34, module.__debug.cloudRadiusFor(2400).toFixed(1))
+
+  // Session windows are islands: each failure must settle nearest its own window, not the
+  // window of another conversation that happened to suffer the same tool.
+  const islandPayload = {
+    generatedAt: now,
+    stats: { total: 4, distinct: 4, shown: 7, matched: 4, truncated: 0, muted: 0, sessions: 2, tools: 2, projects: 0, retro: 0, stale: 0, dev: 0, byKind: {} },
+    prefs: { minCount: 1, ignore: [], prompt: true, inject: true },
+    trend: payload.trend,
+    nodes: [
+      { id: 'root:dsh', kind: 'root', label: 'DSH', count: 4 },
+      { id: 'sessionhub:sess-a', kind: 'sessionhub', label: 'SESSION aaaa', count: 2 },
+      { id: 'sessionhub:sess-b', kind: 'sessionhub', label: 'SESSION bbbb', count: 2 },
+      { id: 'e:a1', kind: 'tool', label: 'edit', name: 'edit', message: 'a1', count: 1, sessions: ['sess-a'] },
+      { id: 'e:a2', kind: 'exit', label: 'pwsh', name: 'pwsh', message: 'a2', count: 1, sessions: ['sess-a'] },
+      { id: 'e:b1', kind: 'tool', label: 'edit', name: 'edit', message: 'b1', count: 1, sessions: ['sess-b'] },
+      { id: 'e:b2', kind: 'exit', label: 'pwsh', name: 'pwsh', message: 'b2', count: 1, sessions: ['sess-b'] },
+    ],
+    links: [
+      { s: 'e:a1', t: 'root:dsh' },
+      { s: 'e:a2', t: 'root:dsh' },
+      { s: 'e:b1', t: 'root:dsh' },
+      { s: 'e:b2', t: 'root:dsh' },
+      { s: 'e:a1', t: 'sessionhub:sess-a' },
+      { s: 'e:a2', t: 'sessionhub:sess-a' },
+      { s: 'e:b1', t: 'sessionhub:sess-b' },
+      { s: 'e:b2', t: 'sessionhub:sess-b' },
+      { s: 'sessionhub:sess-a', t: 'root:dsh' },
+      { s: 'sessionhub:sess-b', t: 'root:dsh' },
+    ],
+    lessons: null,
+    retros: [],
+    recent: [],
+  }
+  renderer.setData(islandPayload)
+  for (let f = 0; f < 150; f += 1) {
+    tick += 16.7
+    if (typeof windowStub.__raf === 'function') {
+      const frame = windowStub.__raf
+      windowStub.__raf = null
+      frame(tick)
+    }
+  }
+  const at = (id) => {
+    const i = new Map(state.nodes.map((node, k) => [node.id, k])).get(id)
+    return [state.pos[i * 3], state.pos[i * 3 + 1], state.pos[i * 3 + 2]]
+  }
+  const near = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2])
+  const hubA = at('sessionhub:sess-a')
+  const hubB = at('sessionhub:sess-b')
+  const ownA = Math.max(near(at('e:a1'), hubA), near(at('e:a2'), hubA))
+  const crossA = Math.min(near(at('e:a1'), hubB), near(at('e:a2'), hubB))
+  const ownB = Math.max(near(at('e:b1'), hubB), near(at('e:b2'), hubB))
+  const crossB = Math.min(near(at('e:b1'), hubA), near(at('e:b2'), hubA))
+  check('window a holds its own failures', ownA < crossA, ownA.toFixed(1) + ' vs ' + crossA.toFixed(1))
+  check('window b holds its own failures', ownB < crossB, ownB.toFixed(1) + ' vs ' + crossB.toFixed(1))
+  check('the windows sit on different islands', near(hubA, hubB) > 8, near(hubA, hubB).toFixed(1))
+
   renderer.dispose()
 
   // The dictionary follows the DSH language setting: re-apply with an English locale and
@@ -808,8 +890,29 @@ async function manifestSection() {
   check('the client carries a build stamp', /const BUILD = 'V\d+'/.test(client))
 }
 
+// ── caps ───────────────────────────────────────────────────────────────────
+async function capSection() {
+  section('caps')
+  const home = tempHome('caps')
+  const host = await bootHost(home, { maxNodes: 3 })
+  const agent = { id: 'sess-caps' }
+  for (let i = 0; i < 12; i += 1) toolFailure(host, agent, 'edit', 'C:/work/proj/f' + i + '.js', 'failure ' + i)
+  const small = await host.call('/error-atlas/data')
+  eq('a low cap truncates', small.json.stats.truncated, 9)
+  eq('a low cap keeps the requested nodes', small.json.nodes.filter((node) => node.kind === 'tool' || node.kind === 'exit').length, 3)
+
+  // The default cap has to hold a real atlas: 260 failures used to be cut off at 240.
+  const bigHome = tempHome('caps-big')
+  const big = await bootHost(bigHome)
+  const bigAgent = { id: 'sess-big' }
+  for (let i = 0; i < 260; i += 1) toolFailure(big, bigAgent, 'edit', 'C:/work/proj/f' + i + '.js', 'failure ' + i)
+  const full = await big.call('/error-atlas/data')
+  eq('the default cap holds 260 failures', full.json.nodes.filter((node) => node.kind === 'tool' || node.kind === 'exit').length, 260)
+  eq('the default cap hides nothing', full.json.stats.truncated, 0)
+}
+
 // ── run ────────────────────────────────────────────────────────────────────
-const sections = [storeSection, retroSection, prefsSection, trendSection, projectSection, exportSection, lessonSection, boardSection, clientSection, manifestSection]
+const sections = [storeSection, retroSection, prefsSection, trendSection, projectSection, exportSection, lessonSection, boardSection, clientSection, capSection, manifestSection]
 for (const run of sections) {
   try {
     await run()

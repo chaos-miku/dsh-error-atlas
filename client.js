@@ -19,6 +19,13 @@ const NS = 'error-atlas'
     const POLL_MS = 6000
     const FOV = Math.PI / 3.3
     const CLOUD_RADIUS = 34
+      // Program hubs orbit outside the error cloud, tethered to it by their links,
+      // so a program reads as a satellite instead of another node in the ball.
+      const SATELLITE_RADIUS = 62
+      // Above this many nodes the exact O(n²) repulsion is replaced by a grid: the
+      // pair count would otherwise freeze the panel while the atlas settles.
+      const GRID_THRESHOLD = 400
+      const REPULSION_CUTOFF = 30
     // Per-frame yaw at 100% on the slider. The slider spans a wide range on
     // purpose: the low end is a calm drift and the top end is unmistakably
     // spinning, so moving the control is visible without staring at it. One
@@ -197,7 +204,7 @@ const NS = 'error-atlas'
     // Bumped on every client change so the panel itself can prove which bundle is
     // live. The chip next to the title shows it; if it is stale the page is running
     // an older bundle and no amount of editing here will be visible.
-    const BUILD = 'V33'
+    const BUILD = 'V36'
 
     const ZH = {
       nav: '错误星图',
@@ -243,7 +250,8 @@ const NS = 'error-atlas'
       clearConfirm: '清空全部运行时错误记录？此操作不可撤销。\n（青色的「开发错误」与紫色的「任务复盘」都是保留的，不会被清空）',
       recent: '最近错误',
       recentSub: 'RECENT EVENTS',
-      hint: '拖拽旋转 · 滚轮缩放 · 点击节点查看',
+            hint: '拖拽旋转 · 滚轮缩放 · 点击节点以其为中心',
+      focused: '已以「{name}」为中心',
       hintPaused: '已暂停 · 拖拽仍可环视 · 点「继续」恢复自转',
       count: '次数',
       lastSeen: '最近',
@@ -350,7 +358,8 @@ const NS = 'error-atlas'
       clearConfirm: 'Clear every runtime error record? This cannot be undone.\n(cyan dev errors and violet retrospectives are kept.)',
       recent: 'Recent errors',
       recentSub: 'RECENT EVENTS',
-      hint: 'drag to rotate · wheel to zoom · click a node',
+            hint: 'drag to rotate · wheel to zoom · click a node to orbit it',
+      focused: 'orbiting “{name}”',
       hintPaused: 'Paused · you can still orbit · click Resume',
       count: 'Count',
       lastSeen: 'Last',
@@ -565,9 +574,9 @@ const NS = 'error-atlas'
       '  vec2 p = gl_PointCoord - vec2(0.5);',
       '  float r = length(p) * 2.0;',
       '  if (r >= 1.0) discard;',
-      '  float core = pow(1.0 - r, 1.9);',
+      '  float core = pow(1.0 - r, 2.25);',
       '  float spark = pow(max(0.0, 1.0 - r * 1.9), 6.0);',
-      '  gl_FragColor = vec4(vColor * (core * 0.85 + spark), vAlpha * core);',
+      '  gl_FragColor = vec4(vColor * (core * 0.7 + spark * 0.9), vAlpha * core * 0.74);',
       '}',
     ].join('\n')
 
@@ -629,6 +638,56 @@ const NS = 'error-atlas'
     // ─────────────────────────────────────────────────────────────────────────
     // renderer: force layout + WebGL draw + label/hit projection
     // ─────────────────────────────────────────────────────────────────────────
+    function hashOf(id) {
+      let hash = 2166136261
+      for (let k = 0; k < id.length; k += 1) {
+        hash = ((hash ^ id.charCodeAt(k)) * 16777619) >>> 0
+      }
+      return hash
+    }
+
+    // The stage grows with the atlas: 240 nodes keep the old 34 unit core, 2400 need
+    // a wider one, otherwise the islands melt back into a single ball.
+    function cloudRadiusFor(n) {
+      return CLOUD_RADIUS * Math.max(1, Math.sqrt(Math.max(1, n) / 240))
+    }
+
+    /** Deterministic orbit slot for a hub, so a refresh never reshuffles the map. */
+    function hubSlot(node, islandRadius, satRadius) {
+      const hash = hashOf(node.id)
+      if (node.kind === 'sessionhub') {
+        const angle = ((hash % 997) / 997) * Math.PI * 2
+        const tilt = (((hash >>> 10) % 991) / 991) * 0.9 - 0.45
+        const ring = islandRadius * (0.92 + ((hash >>> 20) % 100) / 420)
+        return [
+          Math.cos(angle) * Math.cos(tilt) * ring,
+          Math.sin(tilt) * ring,
+          Math.sin(angle) * Math.cos(tilt) * ring,
+        ]
+      }
+      if (node.kind === 'toolhub') {
+        const angle = ((hash % 991) / 991) * Math.PI * 2
+        const ring = islandRadius * 0.34
+        return [
+          Math.cos(angle) * ring,
+          (((hash >>> 8) % 100) / 100 - 0.5) * ring * 0.5,
+          Math.sin(angle) * ring,
+        ]
+      }
+      if (node.kind === 'project') {
+        const angle = ((hash % 997) / 997) * Math.PI * 2
+        const tilt = (((hash >>> 10) % 991) / 991) * 1.15 - 0.575
+        const ring = satRadius * (0.9 + ((hash >>> 20) % 100) / 500)
+        return [
+          Math.cos(angle) * Math.cos(tilt) * ring,
+          Math.sin(tilt) * ring,
+          Math.sin(angle) * Math.cos(tilt) * ring,
+        ]
+      }
+      return [0, 0, 0]
+    }
+
+
     function createRenderer(canvas, labelHost, handlers) {
       const gl =
         canvas.getContext('webgl', { antialias: true, alpha: true, premultipliedAlpha: false, powerPreference: 'high-performance' }) ||
@@ -681,6 +740,11 @@ const NS = 'error-atlas'
         links: [],
         count: 0,
         pos: new Float32Array(0),
+        anchor: new Float32Array(0),
+        islandHub: new Int32Array(0),
+        degree: new Int32Array(0),
+        anchored: new Uint8Array(0),
+        cloudRadius: CLOUD_RADIUS,
         vel: new Float32Array(0),
         mass: new Float32Array(0),
         color: new Float32Array(0),
@@ -707,6 +771,8 @@ const NS = 'error-atlas'
         pitch: -0.14,
         dist: 96,
         targetDist: 96,
+        focus: new Float32Array(3),
+        focusTarget: new Float32Array(3),
         selected: null,
         hovered: null,
         neighbors: new Set(),
@@ -770,13 +836,74 @@ const NS = 'error-atlas'
         const pos = state.pos
         const mass = state.mass
         const size = state.size
+        const nodes = state.nodes
         let seed = 1337
         const rand = () => {
           seed = (seed * 1664525 + 1013904223) >>> 0
           return seed / 4294967296
         }
+
+        const cloud = cloudRadiusFor(n)
+        const satRadius = Math.max(SATELLITE_RADIUS, cloud * 1.75)
+        // Each window needs room: 34 units of arc per island, capped so the satellites
+        // always stay outside the ring.
+        let sessionCount = 0
+        for (let i = 0; i < n; i += 1) if (nodes[i].kind === 'sessionhub') sessionCount += 1
+        const islandRadius = Math.min(satRadius * 0.9, Math.max(cloud * 0.74, (sessionCount * 34) / (Math.PI * 2)))
+        state.cloudRadius = cloud
+        state.anchor = new Float32Array(n * 3)
+        state.anchored = new Uint8Array(n)
+
+        const degree = new Int32Array(n)
+        for (let k = 0; k < state.pairs.length; k += 2) {
+          degree[state.pairs[k]] += 1
+          degree[state.pairs[k + 1]] += 1
+        }
+        state.degree = degree
+
+        const islandHub = new Int32Array(n).fill(-1)
+        state.islandHub = islandHub
+        const hubIndex = new Map()
+        for (let i = 0; i < n; i += 1) if (nodes[i].kind === 'sessionhub') hubIndex.set(nodes[i].id, i)
+
+        const hubAnchors = new Map()
         for (let i = 0; i < n; i += 1) {
-          const node = state.nodes[i]
+          const node = nodes[i]
+          if (isHubNode(node.kind)) hubAnchors.set(node.id, hubSlot(node, islandRadius, satRadius))
+        }
+
+        // A failure belongs to the session window it happened in. That island anchor is
+        // weak on purpose: the hub springs still decide the shape, the anchor only keeps
+        // one island from bleeding into the next one.
+        const islandOf = new Map()
+        for (const link of state.links) {
+          const a = nodes[link.a]
+          const b = nodes[link.b]
+          if (!a || !b) continue
+          if (a.kind === 'sessionhub' && !isHubNode(b.kind) && !islandOf.has(b.id)) islandOf.set(b.id, a.id)
+          else if (b.kind === 'sessionhub' && !isHubNode(a.kind) && !islandOf.has(a.id)) islandOf.set(a.id, b.id)
+        }
+
+        // A retrospective has no direct window link: it borrows the island of the failures it
+        // wrote a lesson about, so the learning stays next to the mistakes it came from.
+        for (const link of state.links) {
+          const a = nodes[link.a]
+          const b = nodes[link.b]
+          if (!a || !b) continue
+          if (islandOf.has(a.id) && !islandOf.has(b.id) && !isHubNode(b.kind)) islandOf.set(b.id, islandOf.get(a.id))
+          else if (islandOf.has(b.id) && !islandOf.has(a.id) && !isHubNode(a.kind)) islandOf.set(a.id, islandOf.get(b.id))
+        }
+
+        // Anchors inside one island are spread with a golden-angle spiral, so the island is
+        // a volume and not a ring of equidistant failures.
+        const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5))
+        const islandLeaves = new Map()
+        for (const islandId of islandOf.values()) islandLeaves.set(islandId, (islandLeaves.get(islandId) || 0) + 1)
+        const islandSeen = new Map()
+        state.islandMode = islandOf.size > 0
+
+        for (let i = 0; i < n; i += 1) {
+          const node = nodes[i]
           const isRoot = node.kind === 'root'
           const isHub = isHubNode(node.kind)
           mass[i] = isRoot ? 60 : isHub ? 9 : 1
@@ -789,16 +916,57 @@ const NS = 'error-atlas'
             pos[i * 3] = 0
             pos[i * 3 + 1] = 0
             pos[i * 3 + 2] = 0
+            state.anchored[i] = 1
             continue
           }
+          if (hubAnchors.has(node.id)) {
+            const [ax, ay, az] = hubAnchors.get(node.id)
+            state.anchor[i * 3] = ax
+            state.anchor[i * 3 + 1] = ay
+            state.anchor[i * 3 + 2] = az
+            state.anchored[i] = 1
+          } else {
+            const island = islandOf.get(node.id)
+            const base = island ? hubAnchors.get(island) : null
+            if (base) {
+              // Spread a window's failures through the volume of its own island instead of
+              // stacking every anchor on one point: a single point turns the island into a
+              // repulsion bomb and the failures end up pinned to the clamp shell.
+              const total = islandLeaves.get(island) || 1
+              const seen = islandSeen.get(island) || 0
+              islandSeen.set(island, seen + 1)
+              const u = (seen + 0.5) / total
+              const radius = cloud * 0.30 * Math.cbrt(u)
+              const phi = Math.acos(1 - 2 * u)
+              const theta = GOLDEN_ANGLE * seen
+              state.anchor[i * 3] = base[0] + radius * Math.sin(phi) * Math.cos(theta)
+              state.anchor[i * 3 + 1] = base[1] + radius * Math.cos(phi)
+              state.anchor[i * 3 + 2] = base[2] + radius * Math.sin(phi) * Math.sin(theta)
+            } else {
+              const radius = cloud * 0.4 * Math.cbrt(rand())
+              const phi = Math.acos(1 - 2 * rand())
+              const theta = 2 * Math.PI * rand()
+              state.anchor[i * 3] = radius * Math.sin(phi) * Math.cos(theta)
+              state.anchor[i * 3 + 1] = radius * Math.cos(phi)
+              state.anchor[i * 3 + 2] = radius * Math.sin(phi) * Math.sin(theta)
+            }
+            const owner = island ? hubIndex.get(island) : undefined
+            if (owner !== undefined) islandHub[i] = owner
+          }
           const kept = previous && previous.get(node.id)
-          if (kept) {
+          if (kept && state.anchored[i] === 0) {
             pos[i * 3] = kept[0]
             pos[i * 3 + 1] = kept[1]
             pos[i * 3 + 2] = kept[2]
             continue
           }
-          const radius = isHub ? 6 + rand() * 10 : 18 + Math.pow(rand(), 0.65) * 34
+          if (state.anchored[i]) {
+            pos[i * 3] = state.anchor[i * 3]
+            pos[i * 3 + 1] = state.anchor[i * 3 + 1]
+            pos[i * 3 + 2] = state.anchor[i * 3 + 2]
+            continue
+          }
+          const radius = cloud * (0.25 + rand() * 0.55)
           const theta = rand() * Math.PI * 2
           const phi = Math.acos(2 * rand() - 1)
           pos[i * 3] = radius * Math.sin(phi) * Math.cos(theta)
@@ -806,8 +974,11 @@ const NS = 'error-atlas'
           pos[i * 3 + 2] = radius * Math.sin(phi) * Math.sin(theta)
         }
         state.vel.fill(0)
-        state.warmup = previous ? 70 : 210
-        state.simBudget = previous ? 100 : 70
+        // Big atlases settle with fewer, shorter passes: the layout has to be usable at
+        // 2400 nodes, and a 210 frame warm-up there would stall the first paint for seconds.
+        const warm = Math.max(40, Math.min(210, Math.round(90000 / Math.max(1, n))))
+        state.warmup = previous ? Math.min(60, warm) : warm
+        state.simBudget = previous ? 60 : Math.max(24, Math.min(70, Math.round(48000 / Math.max(1, n))))
       }
 
       function simulate() {
@@ -816,36 +987,104 @@ const NS = 'error-atlas'
         const pos = state.pos
         const vel = state.vel
         const mass = state.mass
-        const repulsion = 95
+        const nodes = state.nodes
+        // With islands the anchors decide the shape, so repulsion only has to stop nodes
+        // from overlapping; 95 was calibrated for one sparse cloud and pins dense islands
+        // to their clamp shell. Without sessions keep the old value.
+        const repulsion = state.islandMode ? 30 : 95
 
-        for (let i = 0; i < n; i += 1) {
-          const ix = i * 3
-          const px = pos[ix]
-          const py = pos[ix + 1]
-          const pz = pos[ix + 2]
-          let fx = 0
-          let fy = 0
-          let fz = 0
-          for (let j = i + 1; j < n; j += 1) {
-            const jx = j * 3
-            let dx = px - pos[jx]
-            let dy = py - pos[jx + 1]
-            let dz = pz - pos[jx + 2]
-            let d2 = dx * dx + dy * dy + dz * dz
-            if (d2 < 0.02) {
-              d2 = 0.02
-              dx += 0.01
-              dy += 0.01
-              dz += 0.01
-            }
-            const inv = repulsion / (d2 * Math.sqrt(d2))
-            fx += dx * inv
-            fy += dy * inv
-            fz += dz * inv
+        if (n > GRID_THRESHOLD) {
+          // Uniform grid: only nearby pairs repel. The far field is covered by the island
+          // anchors, so truncating the 1/d² tail does not collapse the layout.
+          const cell = REPULSION_CUTOFF
+          const buckets = new Map()
+          for (let i = 0; i < n; i += 1) {
+            const ix = i * 3
+            const key =
+              Math.floor(pos[ix] / cell) + ',' + Math.floor(pos[ix + 1] / cell) + ',' + Math.floor(pos[ix + 2] / cell)
+            const list = buckets.get(key)
+            if (list) list.push(i)
+            else buckets.set(key, [i])
           }
-          vel[ix] += fx / mass[i]
-          vel[ix + 1] += fy / mass[i]
-          vel[ix + 2] += fz / mass[i]
+          for (let i = 0; i < n; i += 1) {
+            const ix = i * 3
+            const px = pos[ix]
+            const py = pos[ix + 1]
+            const pz = pos[ix + 2]
+            const bx = Math.floor(px / cell)
+            const by = Math.floor(py / cell)
+            const bz = Math.floor(pz / cell)
+            let fx = 0
+            let fy = 0
+            let fz = 0
+            for (let ox = -1; ox <= 1; ox += 1) {
+              for (let oy = -1; oy <= 1; oy += 1) {
+                for (let oz = -1; oz <= 1; oz += 1) {
+                  const list = buckets.get(bx + ox + ',' + (by + oy) + ',' + (bz + oz))
+                  if (!list) continue
+                  for (let m = 0; m < list.length; m += 1) {
+                    const j = list[m]
+                    if (j <= i) continue
+                    const jx = j * 3
+                    let dx = px - pos[jx]
+                    let dy = py - pos[jx + 1]
+                    let dz = pz - pos[jx + 2]
+                    let d2 = dx * dx + dy * dy + dz * dz
+                    if (d2 > REPULSION_CUTOFF * REPULSION_CUTOFF) continue
+                    if (d2 < 0.02) {
+                      d2 = 0.02
+                      dx += 0.01
+                      dy += 0.01
+                      dz += 0.01
+                    }
+                    // Two failures of the same window share one island and are expected to
+                    // sit close: full repulsion would push the whole island onto its clamp
+                    // shell. Strangers keep the full push, which is what separates islands.
+                    const soft = state.islandHub[i] >= 0 && state.islandHub[i] === state.islandHub[j] ? 0.3 : 1
+                    const inv = (repulsion * soft) / (d2 * Math.sqrt(d2))
+                    fx += dx * inv
+                    fy += dy * inv
+                    fz += dz * inv
+                  }
+                }
+              }
+            }
+            vel[ix] += fx / mass[i]
+            vel[ix + 1] += fy / mass[i]
+            vel[ix + 2] += fz / mass[i]
+          }
+        } else {
+          for (let i = 0; i < n; i += 1) {
+            const ix = i * 3
+            const px = pos[ix]
+            const py = pos[ix + 1]
+            const pz = pos[ix + 2]
+            let fx = 0
+            let fy = 0
+            let fz = 0
+            for (let j = i + 1; j < n; j += 1) {
+              const jx = j * 3
+              let dx = px - pos[jx]
+              let dy = py - pos[jx + 1]
+              let dz = pz - pos[jx + 2]
+              let d2 = dx * dx + dy * dy + dz * dz
+              if (d2 < 0.02) {
+                d2 = 0.02
+                dx += 0.01
+                dy += 0.01
+                dz += 0.01
+              }
+              // As in the grid path: siblings inside one island tolerate each other.
+              const soft = state.islandHub[i] >= 0 && state.islandHub[i] === state.islandHub[j] ? 0.3 : 1
+              const inv = (repulsion * soft) / (d2 * Math.sqrt(d2))
+              fx += dx * inv
+              fy += dy * inv
+              fz += dz * inv
+            }
+            vel[ix] += fx / mass[i]
+            vel[ix + 1] += fy / mass[i]
+            vel[ix + 2] += fz / mass[i]
+          }
         }
 
         const pairs = state.pairs
@@ -859,7 +1098,34 @@ const NS = 'error-atlas'
           const dy = pos[jx + 1] - pos[ix + 1]
           const dz = pos[jx + 2] - pos[ix + 2]
           const d = Math.sqrt(dx * dx + dy * dy + dz * dz) || 0.01
-          const force = (d - 11) * 0.05
+          // Not every edge means the same thing: a failure is pulled tight to its window,
+          // loosely to its tool, and only tethered to the core.
+          const ka = nodes[i].kind
+          const kb = nodes[j].kind
+          let target = 12
+          let stiffness = 0.02
+          if (state.links[k] && state.links[k].lesson) {
+            target = 18
+            stiffness = 0.02
+          } else if (ka === 'sessionhub' || kb === 'sessionhub') {
+            target = 10
+            stiffness = 0.07
+          } else if (ka === 'project' || kb === 'project') {
+            target = 13
+            stiffness = 0.03
+          } else if (ka === 'root' || kb === 'root') {
+            target = 14
+            stiffness = 0.004
+          }
+          // A hub with hundreds of links must not be dragged inward by all of them at
+          // once, or the program satellites sink into the error cloud.
+          // Only satellites need the degree damping: a window hub is the spine of its island,
+          // and weakening those links lets the island flatten onto its clamp shell.
+          if (ka === 'project' || kb === 'project') {
+            const hubDegree = Math.max(state.degree[i] || 0, state.degree[j] || 0)
+            if (hubDegree > 12) stiffness *= 12 / hubDegree
+          }
+          const force = (d - target) * stiffness
           const ux = (dx / d) * force
           const uy = (dy / d) * force
           const uz = (dz / d) * force
@@ -869,6 +1135,16 @@ const NS = 'error-atlas'
           vel[jx] -= ux / mass[j]
           vel[jx + 1] -= uy / mass[j]
           vel[jx + 2] -= uz / mass[j]
+        }
+
+        // Island anchors: hubs are pinned on their slot, failures are held loosely so the
+        // hub springs still decide the local shape.
+        for (let i = 0; i < n; i += 1) {
+          const ix = i * 3
+          const k = state.anchored[i] ? 0.16 : 0.8
+          vel[ix] += (state.anchor[ix] - pos[ix]) * k
+          vel[ix + 1] += (state.anchor[ix + 1] - pos[ix + 1]) * k
+          vel[ix + 2] += (state.anchor[ix + 2] - pos[ix + 2]) * k
         }
 
         for (let i = 0; i < n; i += 1) {
@@ -903,7 +1179,7 @@ const NS = 'error-atlas'
         // Without this the repulsion drifts the whole cloud past the camera and the
         // graph silently leaves the screen. When a DSH core node exists it *is* the
         // anchor, so the cloud is never recentred away from it.
-        const hasRoot = state.nodes.some((node) => node.kind === 'root')
+        const hasRoot = nodes.some((node) => node.kind === 'root')
         let cx = 0
         let cy = 0
         let cz = 0
@@ -917,9 +1193,11 @@ const NS = 'error-atlas'
           cy /= n
           cz /= n
         }
+        const cloud = state.cloudRadius || CLOUD_RADIUS
         for (let i = 0; i < n; i += 1) {
           const ix = i * 3
-          if (state.nodes[i].kind === 'root') {
+          const kind = nodes[i].kind
+          if (kind === 'root') {
             pos[ix] = 0
             pos[ix + 1] = 0
             pos[ix + 2] = 0
@@ -932,8 +1210,9 @@ const NS = 'error-atlas'
           let py = pos[ix + 1] - cy
           let pz = pos[ix + 2] - cz
           const r = Math.sqrt(px * px + py * py + pz * pz)
-          if (r > CLOUD_RADIUS) {
-            const s = CLOUD_RADIUS / r
+          const limit = kind === 'project' ? Math.max(SATELLITE_RADIUS, cloud * 1.75) * 1.3 : isHubNode(kind) ? cloud * 1.35 : cloud * 1.12
+          if (r > limit) {
+            const s = limit / r
             px *= s
             py *= s
             pz *= s
@@ -944,6 +1223,25 @@ const NS = 'error-atlas'
           pos[ix] = px
           pos[ix + 1] = py
           pos[ix + 2] = pz
+
+          const owner = state.islandHub[i]
+          if (owner >= 0 && owner !== i) {
+            const ox = owner * 3
+            let dx = pos[ix] - pos[ox]
+            let dy = pos[ix + 1] - pos[ox + 1]
+            let dz = pos[ix + 2] - pos[ox + 2]
+            const d = Math.sqrt(dx * dx + dy * dy + dz * dz)
+            const reach = cloud * 0.42
+            if (d > reach) {
+              const s = reach / d
+              pos[ix] = pos[ox] + dx * s
+              pos[ix + 1] = pos[ox + 1] + dy * s
+              pos[ix + 2] = pos[ox + 2] + dz * s
+              vel[ix] *= 0.4
+              vel[ix + 1] *= 0.4
+              vel[ix + 2] *= 0.4
+            }
+          }
         }
       }
 
@@ -978,8 +1276,13 @@ const NS = 'error-atlas'
         const ry = rotationY(new Float32Array(16), state.yaw)
         const rx = rotationX(new Float32Array(16), state.pitch)
         multiply(spin, ry, rx)
+        // Pull the orbit centre onto the picked node before spinning, so the camera
+        // circles that node instead of the middle of the whole cloud.
+        const focus = translation(new Float32Array(16), -state.focus[0], -state.focus[1], -state.focus[2])
+        const centred = new Float32Array(16)
+        multiply(centred, spin, focus)
         const t = translation(new Float32Array(16), 0, 0, -state.dist)
-        multiply(view, t, spin)
+        multiply(view, t, centred)
         const vp = new Float32Array(16)
         multiply(vp, proj, view)
         return vp
@@ -1152,7 +1455,7 @@ const NS = 'error-atlas'
           uploadLinks()
           gl.useProgram(linkProgram)
           gl.uniformMatrix4fv(linkLoc.uVP, false, vp)
-          gl.uniform1f(linkLoc.uAlphaMul, 0.85)
+          gl.uniform1f(linkLoc.uAlphaMul, 0.68)
           gl.bindBuffer(gl.ARRAY_BUFFER, linkBuffers.position)
           gl.enableVertexAttribArray(linkLoc.position)
           gl.vertexAttribPointer(linkLoc.position, 3, gl.FLOAT, false, 0, 0)
@@ -1206,8 +1509,8 @@ const NS = 'error-atlas'
           gl.enableVertexAttribArray(nodeLoc.alpha)
           gl.vertexAttribPointer(nodeLoc.alpha, 1, gl.FLOAT, false, 0, 0)
 
-          gl.uniform1f(nodeLoc.uSizeMul, 3.2)
-          gl.uniform1f(nodeLoc.uAlphaMul, 0.075)
+          gl.uniform1f(nodeLoc.uSizeMul, 3.0)
+          gl.uniform1f(nodeLoc.uAlphaMul, 0.048)
           gl.drawArrays(gl.POINTS, 0, state.count)
 
           gl.uniform1f(nodeLoc.uSizeMul, 1.0)
@@ -1288,6 +1591,8 @@ const NS = 'error-atlas'
         }
         // frame-rate independent easing: 0.08 per 60Hz frame
         state.dist += (state.targetDist - state.dist) * (1 - Math.pow(0.92, dt))
+          const focusEase = 1 - Math.pow(0.86, dt)
+          for (let k = 0; k < 3; k += 1) state.focus[k] += (state.focusTarget[k] - state.focus[k]) * focusEase
 
         if (state.alphaDirty) {
           const sel = state.selected
@@ -1347,6 +1652,7 @@ const NS = 'error-atlas'
         nodes.forEach((node, index) => {
           byId.set(node.id, index)
         })
+        state.indexById = byId
         const links = []
         const pairs = []
         const linkColor = []
@@ -1372,7 +1678,14 @@ const NS = 'error-atlas'
           const cb = KIND_COLOR[nodes[b].kind] || [1, 1, 1]
           linkColor.push((ca[0] + cb[0]) * 0.5, (ca[1] + cb[1]) * 0.5, (ca[2] + cb[2]) * 0.5)
           linkColor.push((ca[0] + cb[0]) * 0.5, (ca[1] + cb[1]) * 0.5, (ca[2] + cb[2]) * 0.5)
-          linkAlpha.push(0.2, 0.2)
+          // The tether to a satellite is drawn a little brighter than a hub spoke:
+          // it is the only thing that tells you which ball the program belongs to.
+          // Spokes to the core are the most numerous edges in the graph, so they stay
+          // dim: the islands should be readable before the web around the core is.
+          const satelliteEdge = nodes[a].kind === 'project' || nodes[b].kind === 'project'
+          const rootSpoke = nodes[a].kind === 'root' || nodes[b].kind === 'root'
+          const alpha = satelliteEdge ? 0.34 : rootSpoke ? 0.07 : 0.2
+          linkAlpha.push(alpha, alpha)
         }
 
         const count = nodes.length
@@ -1427,7 +1740,7 @@ const NS = 'error-atlas'
           state.color[i * 3] = color[0]
           state.color[i * 3 + 1] = color[1]
           state.color[i * 3 + 2] = color[2]
-          state.baseAlpha[i] = isHubNode(nodes[i].kind) ? 1 : 0.92
+          state.baseAlpha[i] = isHubNode(nodes[i].kind) ? 0.94 : 0.74
           state.alpha[i] = state.baseAlpha[i]
         }
         for (let i = 0; i < count; i += 1) {
@@ -1530,6 +1843,23 @@ const NS = 'error-atlas'
         return best >= 0 ? state.nodes[best] : null
       }
 
+      /** Circle the camera around one node: its position becomes the orbit centre. */
+      function focusOn(node) {
+        if (!node || !state.indexById) return false
+        const index = state.indexById.get(node.id)
+        if (index === undefined) return false
+        state.focusTarget[0] = state.pos[index * 3]
+        state.focusTarget[1] = state.pos[index * 3 + 1]
+        state.focusTarget[2] = state.pos[index * 3 + 2]
+        return true
+      }
+
+      function clearFocus() {
+        state.focusTarget[0] = 0
+        state.focusTarget[1] = 0
+        state.focusTarget[2] = 0
+      }
+
       function resetView() {
         state.yaw = 0.55
         state.pitch = -0.14
@@ -1537,6 +1867,7 @@ const NS = 'error-atlas'
         state.warmup = 120
         state.simBudget = 0
         state.needsFit = true
+        clearFocus()
       }
 
       function relayout() {
@@ -1585,7 +1916,11 @@ const NS = 'error-atlas'
           /* ignore */
         }
         if (state.moved > 6) return
-        const node = hitTest(event.clientX, event.clientY)
+                const node = hitTest(event.clientX, event.clientY)
+        // Where you click is what you orbit: the picked node becomes the camera centre,
+        // and a click on empty space returns the camera to the middle of the cloud.
+        if (node) focusOn(node)
+        else clearFocus()
         if (handlers && typeof handlers.onPick === 'function') handlers.onPick(node)
       }
 
@@ -1632,7 +1967,9 @@ const NS = 'error-atlas'
         setQuery,
         setLabels,
         hitTest,
-        resetView,
+                resetView,
+        focusOn,
+        clearFocus,
         relayout,
         // Test hook only: lets a headless harness inspect the live render state.
         __state: () => state,
@@ -2092,6 +2429,7 @@ const NS = 'error-atlas'
       const [data, setData] = useState(() => withDev(null))
       const [failure, setFailure] = useState(null)
       const [selectedId, setSelectedId] = useState(null)
+      const [focusedLabel, setFocusedLabel] = useState(null)
       const [hoveredNode, setHoveredNode] = useState(null)
       const [showLog, setShowLog] = useState(true)
       const [spin, setSpin] = useState(() => {
@@ -2217,10 +2555,11 @@ const NS = 'error-atlas'
         try {
           renderer = createRenderer(canvas, labelHost, {
             onHover: (node) => setHoveredNode(node || null),
-            onPick: (node) => {
+                  onPick: (node) => {
               const next = node ? node.id : null
               setSelectedId(next)
               setHoveredNode(node || null)
+              setFocusedLabel(node ? String(node.label || node.name || node.id).slice(0, 30) : null)
             },
             onOpen: (node) => {
               const id = sessionIdOf(node)
@@ -2584,6 +2923,7 @@ const NS = 'error-atlas'
       // The hint carries the two honesty notes: how much of the graph is truncated and
       // how many signatures the noise rules are hiding, plus the navigation gesture.
       const hintBits = []
+      if (focusedLabel) hintBits.push(fill(COPY.focused, { name: focusedLabel }))
       if (stats && stats.truncated > 0) {
         hintBits.push(fill(COPY.truncatedHint, { shown: stats.shown, cut: stats.truncated }))
       }

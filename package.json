@@ -1,8 +1,8 @@
 {
   "name": "dsh-error-atlas",
-  "version": "0.11.2",
+  "version": "0.11.5",
   "type": "module",
-  "description": "Records runtime errors and coding-task retrospectives, and renders them as an interactive GPU knowledge graph (WebGL) with lesson links, recurrence flags, program hubs, search, activity trends, and a caption switch.",
+  "description": "Records runtime errors and coding-task retrospectives, and renders them as an interactive GPU knowledge graph (WebGL) with lesson links, recurrence flags, program satellites, session islands, orbit-any-node camera, search, activity trends, and a caption switch.",
   "icon": "icon.svg",
   "license": "MIT",
   "author": "chaos-miku",
@@ -42,7 +42,8 @@
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",
-    "docs/*.jpg"
+    "docs/*.jpg",
+    "docs/*.png"
   ],
   "bin": {
     "atlas-retro": "bin/atlas-retro.mjs",
