@@ -204,7 +204,7 @@ const NS = 'error-atlas'
     // Bumped on every client change so the panel itself can prove which bundle is
     // live. The chip next to the title shows it; if it is stale the page is running
     // an older bundle and no amount of editing here will be visible.
-    const BUILD = 'V44'
+    const BUILD = 'V45'
 
     const ZH = {
       nav: '错误星图',
@@ -245,6 +245,7 @@ const NS = 'error-atlas'
       exportFailed: '导出失败',
       spin: '自转',
       scale: '大小',
+      halo: '光晕',
       pause: '暂停',
       resume: '继续',
       clear: '清空',
@@ -354,6 +355,7 @@ const NS = 'error-atlas'
       exportFailed: 'Export failed',
       spin: 'Spin',
       scale: 'Size',
+      halo: 'Glow',
       pause: 'Pause',
       resume: 'Resume',
       clear: 'Clear',
@@ -554,6 +556,7 @@ const NS = 'error-atlas'
       'uniform mat4 uVP;',
       'uniform float uFocal;',
       'uniform float uRefDist;',
+      'uniform float uMaxSize;',
       'uniform float uSizeMul;',
       'uniform float uAlphaMul;',
       'varying vec3 vColor;',
@@ -562,10 +565,25 @@ const NS = 'error-atlas'
       '  vec4 clip = uVP * vec4(aPosition, 1.0);',
       '  gl_Position = clip;',
       '  float w = max(0.01, clip.w);',
-      '  gl_PointSize = clamp(aSize * uSizeMul * uFocal / max(uRefDist, 1.0), 1.5, 44.0);',
+      '  gl_PointSize = clamp(aSize * uSizeMul * uFocal / max(uRefDist, 1.0), 1.5, uMaxSize);',
       '  float fog = clamp(2.4 - w * 0.009, 0.08, 1.0);',
       '  vAlpha = aAlpha * uAlphaMul * fog;',
       '  vColor = aColor;',
+      '}',
+    ].join('\n')
+
+    // A soft radial falloff, kept separate from the solid node core: this is the glow
+    // that makes a dense atlas read as a nebula instead of a pile of dots.
+    const HALO_FS = [
+      'precision mediump float;',
+      'varying vec3 vColor;',
+      'varying float vAlpha;',
+      'void main() {',
+      '  vec2 p = gl_PointCoord - vec2(0.5);',
+      '  float r = length(p) * 2.0;',
+      '  if (r >= 1.0) discard;',
+      '  float g = pow(1.0 - r, 2.6);',
+      '  gl_FragColor = vec4(vColor * g * 1.15, vAlpha * g * 0.9);',
       '}',
     ].join('\n')
 
@@ -709,6 +727,7 @@ const NS = 'error-atlas'
       if (!gl) return null
 
       const nodeProgram = createProgram(gl, NODE_VS, NODE_FS)
+      const haloProgram = typeof HALO_FS === 'string' ? createProgram(gl, NODE_VS, HALO_FS) : null
       const linkProgram = createProgram(gl, LINK_VS, LINK_FS)
 
       const nodeLoc = {
@@ -719,8 +738,21 @@ const NS = 'error-atlas'
         uVP: gl.getUniformLocation(nodeProgram, 'uVP'),
         uFocal: gl.getUniformLocation(nodeProgram, 'uFocal'),
         uRefDist: gl.getUniformLocation(nodeProgram, 'uRefDist'),
+        uMaxSize: gl.getUniformLocation(nodeProgram, 'uMaxSize'),
         uSizeMul: gl.getUniformLocation(nodeProgram, 'uSizeMul'),
         uAlphaMul: gl.getUniformLocation(nodeProgram, 'uAlphaMul'),
+      }
+      const haloLoc = {
+        position: gl.getAttribLocation(haloProgram, 'aPosition'),
+        color: gl.getAttribLocation(haloProgram, 'aColor'),
+        size: gl.getAttribLocation(haloProgram, 'aSize'),
+        alpha: gl.getAttribLocation(haloProgram, 'aAlpha'),
+        uVP: gl.getUniformLocation(haloProgram, 'uVP'),
+        uFocal: gl.getUniformLocation(haloProgram, 'uFocal'),
+        uRefDist: gl.getUniformLocation(haloProgram, 'uRefDist'),
+        uMaxSize: gl.getUniformLocation(haloProgram, 'uMaxSize'),
+        uSizeMul: gl.getUniformLocation(haloProgram, 'uSizeMul'),
+        uAlphaMul: gl.getUniformLocation(haloProgram, 'uAlphaMul'),
       }
       const linkLoc = {
         position: gl.getAttribLocation(linkProgram, 'aPosition'),
@@ -786,6 +818,7 @@ const NS = 'error-atlas'
         dist: 96,
         targetDist: 96,
         scale: 1,
+        halo: 1,
         focus: new Float32Array(3),
         focusTarget: new Float32Array(3),
         selected: null,
@@ -1582,12 +1615,49 @@ const NS = 'error-atlas'
           gl.enableVertexAttribArray(nodeLoc.alpha)
           gl.vertexAttribPointer(nodeLoc.alpha, 1, gl.FLOAT, false, 0, 0)
 
-          gl.uniform1f(nodeLoc.uSizeMul, 3.2 * state.scale)
-          gl.uniform1f(nodeLoc.uAlphaMul, 0.034)
-          gl.drawArrays(gl.POINTS, 0, state.count)
-
+          gl.uniform1f(nodeLoc.uMaxSize, 44.0)
           gl.uniform1f(nodeLoc.uSizeMul, state.scale)
           gl.uniform1f(nodeLoc.uAlphaMul, 0.95)
+
+          if (haloProgram && state.halo > 0.02) {
+            gl.useProgram(haloProgram)
+            gl.uniformMatrix4fv(haloLoc.uVP, false, vp)
+            gl.uniform1f(haloLoc.uFocal, focalDevice)
+            gl.uniform1f(haloLoc.uRefDist, state.fitDist || 96)
+            gl.uniform1f(haloLoc.uMaxSize, 320.0)
+            gl.uniform1f(haloLoc.uSizeMul, (1.1 + 2.7 * state.halo) * state.scale)
+            gl.uniform1f(haloLoc.uAlphaMul, 0.085 * Math.min(1.15, state.halo))
+            gl.bindBuffer(gl.ARRAY_BUFFER, nodeBuffers.position)
+            gl.enableVertexAttribArray(haloLoc.position)
+            gl.vertexAttribPointer(haloLoc.position, 3, gl.FLOAT, false, 0, 0)
+            gl.bindBuffer(gl.ARRAY_BUFFER, nodeBuffers.color)
+            gl.enableVertexAttribArray(haloLoc.color)
+            gl.vertexAttribPointer(haloLoc.color, 3, gl.FLOAT, false, 0, 0)
+            gl.bindBuffer(gl.ARRAY_BUFFER, nodeBuffers.size)
+            gl.enableVertexAttribArray(haloLoc.size)
+            gl.vertexAttribPointer(haloLoc.size, 1, gl.FLOAT, false, 0, 0)
+            gl.bindBuffer(gl.ARRAY_BUFFER, nodeBuffers.alpha)
+            gl.enableVertexAttribArray(haloLoc.alpha)
+            gl.vertexAttribPointer(haloLoc.alpha, 1, gl.FLOAT, false, 0, 0)
+            gl.drawArrays(gl.POINTS, 0, state.count)
+
+            // Attribute state is global in WebGL1, so the node pass has to re-bind its
+            // own pointers after the halo program used the same buffers.
+            gl.useProgram(nodeProgram)
+            gl.bindBuffer(gl.ARRAY_BUFFER, nodeBuffers.position)
+            gl.enableVertexAttribArray(nodeLoc.position)
+            gl.vertexAttribPointer(nodeLoc.position, 3, gl.FLOAT, false, 0, 0)
+            gl.bindBuffer(gl.ARRAY_BUFFER, nodeBuffers.color)
+            gl.enableVertexAttribArray(nodeLoc.color)
+            gl.vertexAttribPointer(nodeLoc.color, 3, gl.FLOAT, false, 0, 0)
+            gl.bindBuffer(gl.ARRAY_BUFFER, nodeBuffers.size)
+            gl.enableVertexAttribArray(nodeLoc.size)
+            gl.vertexAttribPointer(nodeLoc.size, 1, gl.FLOAT, false, 0, 0)
+            gl.bindBuffer(gl.ARRAY_BUFFER, nodeBuffers.alpha)
+            gl.enableVertexAttribArray(nodeLoc.alpha)
+            gl.vertexAttribPointer(nodeLoc.alpha, 1, gl.FLOAT, false, 0, 0)
+          }
+
           gl.drawArrays(gl.POINTS, 0, state.count)
         }
 
@@ -2053,6 +2123,10 @@ const NS = 'error-atlas'
         __state: () => state,
                 setScale(value) {
           state.scale = Math.max(0.08, Math.min(3, Number(value) || 1))
+        },
+
+        setHalo(value) {
+          state.halo = Math.max(0, Math.min(4, Number(value) || 0))
         },
 
         setSpin(value) {
@@ -2522,6 +2596,14 @@ const NS = 'error-atlas'
           return 100
         }
       })
+      const [halo, setHalo] = useState(() => {
+        try {
+          const raw = Number(window.localStorage.getItem('dsh-error-atlas-halo'))
+          return Number.isFinite(raw) && raw >= 0 && raw <= 400 ? raw : 100
+        } catch {
+          return 100
+        }
+      })
       const [spin, setSpin] = useState(() => {
         try {
           const saved = Number(window.localStorage.getItem('dsh-error-atlas-spin'))
@@ -2701,6 +2783,7 @@ const NS = 'error-atlas'
         const renderer = rendererRef.current
         if (renderer) renderer.setSpin(spin / 100)
           if (renderer) renderer.setScale(scale / 100)
+          if (renderer) renderer.setHalo(halo / 100)
       }, [spin])
 
       useEffect(() => {
@@ -2731,6 +2814,17 @@ const NS = 'error-atlas'
         const renderer = rendererRef.current
         if (renderer) renderer.setPaused(next)
         setPaused(next)
+      }, [])
+
+      const onHalo = useCallback((value) => {
+        const next = Math.max(0, Math.min(400, Number(value) || 0))
+        setHalo(next)
+        try {
+          window.localStorage.setItem('dsh-error-atlas-halo', String(next))
+        } catch {
+          /* storage is best effort */
+        }
+        if (rendererRef.current) rendererRef.current.setHalo(next / 100)
       }, [])
 
       const onScale = useCallback((value) => {
@@ -2990,6 +3084,22 @@ const NS = 'error-atlas'
               onInput: (event) => onScale(event.target.value),
             }),
             h('span', { className: 'dshea-spin-value' }, Math.round(scale) + '%'),
+          ),
+          h(
+            'label',
+            { className: 'dshea-spin dshea-halo' },
+            h('span', { className: 'dshea-spin-label' }, COPY.halo),
+            h('input', {
+              type: 'range',
+              min: 0,
+              max: 400,
+              step: 5,
+              value: halo,
+              className: 'dshea-range',
+              onChange: (event) => onHalo(event.target.value),
+              onInput: (event) => onHalo(event.target.value),
+            }),
+            h('span', { className: 'dshea-spin-value' }, Math.round(halo) + '%'),
           ),
           h(
             'label',
