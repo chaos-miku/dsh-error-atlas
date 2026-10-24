@@ -204,7 +204,7 @@ const NS = 'error-atlas'
     // Bumped on every client change so the panel itself can prove which bundle is
     // live. The chip next to the title shows it; if it is stale the page is running
     // an older bundle and no amount of editing here will be visible.
-    const BUILD = 'V45'
+    const BUILD = 'V46'
 
     const ZH = {
       nav: '错误星图',
@@ -246,6 +246,8 @@ const NS = 'error-atlas'
       spin: '自转',
       scale: '大小',
       halo: '光晕',
+      flow: '光点',
+      style: '外观',
       pause: '暂停',
       resume: '继续',
       clear: '清空',
@@ -356,6 +358,8 @@ const NS = 'error-atlas'
       spin: 'Spin',
       scale: 'Size',
       halo: 'Glow',
+      flow: 'Pulse',
+      style: 'Look',
       pause: 'Pause',
       resume: 'Resume',
       clear: 'Clear',
@@ -582,8 +586,9 @@ const NS = 'error-atlas'
       '  vec2 p = gl_PointCoord - vec2(0.5);',
       '  float r = length(p) * 2.0;',
       '  if (r >= 1.0) discard;',
-      '  float g = pow(1.0 - r, 2.6);',
-      '  gl_FragColor = vec4(vColor * g * 1.15, vAlpha * g * 0.9);',
+      '  float g = pow(1.0 - r, 2.1);',
+      '  vec3 tint = mix(vColor, vec3(1.0), 0.25);',
+      '  gl_FragColor = vec4(tint * g * 1.35, vAlpha * g);',
       '}',
     ].join('\n')
 
@@ -819,6 +824,7 @@ const NS = 'error-atlas'
         targetDist: 96,
         scale: 1,
         halo: 1,
+        flowScale: 1,
         focus: new Float32Array(3),
         focusTarget: new Float32Array(3),
         selected: null,
@@ -1508,12 +1514,11 @@ const NS = 'error-atlas'
           const by = pos[to3 + 1]
           const bz = pos[to3 + 2]
           const ease = t * t * (3 - 2 * t)
-          // A pulse rides the pipe itself: only a hair of bow, so it always reads as
-          // travelling on the drawn line rather than floating beside it.
-          const lift = Math.sin(Math.PI * t) * 0.16
-          state.flowPos[i * 3] = ax + (bx - ax) * ease + lift * 0.3
-          state.flowPos[i * 3 + 1] = ay + (by - ay) * ease + lift
-          state.flowPos[i * 3 + 2] = az + (bz - az) * ease + lift * 0.25
+          // No bow at all: the link is a straight line, so the pulse has to be a point
+          // on that line, otherwise it visibly floats off the wire.
+          state.flowPos[i * 3] = ax + (bx - ax) * ease
+          state.flowPos[i * 3 + 1] = ay + (by - ay) * ease
+          state.flowPos[i * 3 + 2] = az + (bz - az) * ease
 
           const fresh = state.learnRetros.has(edge.retroId) ? state.learnBoost : 0
           let dim = 1
@@ -1579,7 +1584,7 @@ const NS = 'error-atlas'
           gl.uniformMatrix4fv(nodeLoc.uVP, false, vp)
           gl.uniform1f(nodeLoc.uFocal, focalDevice)
           gl.uniform1f(nodeLoc.uRefDist, state.fitDist || 96)
-          gl.uniform1f(nodeLoc.uSizeMul, Math.max(0.5, state.scale))
+          gl.uniform1f(nodeLoc.uSizeMul, state.flowScale)
           gl.uniform1f(nodeLoc.uAlphaMul, 1.0)
           gl.bindBuffer(gl.ARRAY_BUFFER, flowBuffers.position)
           gl.enableVertexAttribArray(nodeLoc.position)
@@ -1624,9 +1629,7 @@ const NS = 'error-atlas'
             gl.uniformMatrix4fv(haloLoc.uVP, false, vp)
             gl.uniform1f(haloLoc.uFocal, focalDevice)
             gl.uniform1f(haloLoc.uRefDist, state.fitDist || 96)
-            gl.uniform1f(haloLoc.uMaxSize, 320.0)
-            gl.uniform1f(haloLoc.uSizeMul, (1.1 + 2.7 * state.halo) * state.scale)
-            gl.uniform1f(haloLoc.uAlphaMul, 0.085 * Math.min(1.15, state.halo))
+            gl.uniform1f(haloLoc.uMaxSize, 420.0)
             gl.bindBuffer(gl.ARRAY_BUFFER, nodeBuffers.position)
             gl.enableVertexAttribArray(haloLoc.position)
             gl.vertexAttribPointer(haloLoc.position, 3, gl.FLOAT, false, 0, 0)
@@ -1639,6 +1642,13 @@ const NS = 'error-atlas'
             gl.bindBuffer(gl.ARRAY_BUFFER, nodeBuffers.alpha)
             gl.enableVertexAttribArray(haloLoc.alpha)
             gl.vertexAttribPointer(haloLoc.alpha, 1, gl.FLOAT, false, 0, 0)
+            // Two additive layers make a bulb, not an airbrush: a tight bright corona
+            // plus a wide faint spill.
+            gl.uniform1f(haloLoc.uSizeMul, (1.0 + 1.7 * state.halo) * state.scale)
+            gl.uniform1f(haloLoc.uAlphaMul, 0.42 * Math.min(1.3, state.halo))
+            gl.drawArrays(gl.POINTS, 0, state.count)
+            gl.uniform1f(haloLoc.uSizeMul, (2.3 + 4.4 * state.halo) * state.scale)
+            gl.uniform1f(haloLoc.uAlphaMul, 0.13 * Math.min(1.5, state.halo))
             gl.drawArrays(gl.POINTS, 0, state.count)
 
             // Attribute state is global in WebGL1, so the node pass has to re-bind its
@@ -2129,6 +2139,10 @@ const NS = 'error-atlas'
           state.halo = Math.max(0, Math.min(4, Number(value) || 0))
         },
 
+        setFlowScale(value) {
+          state.flowScale = Math.max(0.2, Math.min(4, Number(value) || 1))
+        },
+
         setSpin(value) {
           const next = Number(value)
           if (!Number.isFinite(next)) return
@@ -2227,6 +2241,24 @@ const NS = 'error-atlas'
 .dshea-stat-label { font-size: 9px; letter-spacing: 0.16em; color: rgba(236, 238, 243, 0.42); text-transform: uppercase; }
 .dshea-spacer { flex: 1 1 auto; }
 .dshea-actions { display: flex; align-items: center; gap: 7px; }
+.dshea-style {
+  display: none;
+  position: absolute;
+  top: 52px;
+  right: 14px;
+  z-index: 6;
+  flex-direction: column;
+  gap: 9px;
+  min-width: 240px;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 122, 132, 0.28);
+  border-radius: 10px;
+  background: rgba(10, 8, 10, 0.94);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.55);
+}
+.dshea-style.is-open { display: flex; }
+.dshea-style .dshea-spin { justify-content: space-between; }
+.dshea-style .dshea-range { flex: 1 1 auto; margin: 0 8px; }
 .dshea-btn {
   appearance: none;
   border: 1px solid rgba(255, 255, 255, 0.14);
@@ -2596,6 +2628,15 @@ const NS = 'error-atlas'
           return 100
         }
       })
+      const [flowScale, setFlowScale] = useState(() => {
+        try {
+          const raw = Number(window.localStorage.getItem('dsh-error-atlas-flow'))
+          return Number.isFinite(raw) && raw >= 20 && raw <= 400 ? raw : 100
+        } catch {
+          return 100
+        }
+      })
+      const [styleOpen, setStyleOpen] = useState(false)
       const [halo, setHalo] = useState(() => {
         try {
           const raw = Number(window.localStorage.getItem('dsh-error-atlas-halo'))
@@ -2784,6 +2825,7 @@ const NS = 'error-atlas'
         if (renderer) renderer.setSpin(spin / 100)
           if (renderer) renderer.setScale(scale / 100)
           if (renderer) renderer.setHalo(halo / 100)
+          if (renderer) renderer.setFlowScale(flowScale / 100)
       }, [spin])
 
       useEffect(() => {
@@ -2814,6 +2856,17 @@ const NS = 'error-atlas'
         const renderer = rendererRef.current
         if (renderer) renderer.setPaused(next)
         setPaused(next)
+      }, [])
+
+      const onFlowScale = useCallback((value) => {
+        const next = Math.max(20, Math.min(400, Number(value) || 100))
+        setFlowScale(next)
+        try {
+          window.localStorage.setItem('dsh-error-atlas-flow', String(next))
+        } catch {
+          /* storage is best effort */
+        }
+        if (rendererRef.current) rendererRef.current.setFlowScale(next / 100)
       }, [])
 
       const onHalo = useCallback((value) => {
@@ -3050,56 +3103,14 @@ const NS = 'error-atlas'
             paused ? COPY.resume : COPY.pause,
           ),
           h(
-            'label',
-            { className: 'dshea-spin' },
-            h('span', { className: 'dshea-spin-label' }, COPY.spin),
-            h('input', {
-              type: 'range',
-              min: 0,
-              max: 100,
-              step: 1,
-              value: spin,
-              className: 'dshea-range',
-              // Both handlers on purpose: `onChange` is React's normal range
-              // path, `onInput` keeps the control alive even if an intermediate
-              // layer swallows the synthetic change event.
-              onChange: (event) => onSpin(event.target.value),
-              onInput: (event) => onSpin(event.target.value),
-            }),
-            h('span', { className: 'dshea-spin-value' }, Math.round(spin) + '%'),
-            h('span', { className: 'dshea-spin-rate' }, rateLabel),
-          ),
-          h(
-            'label',
-            { className: 'dshea-spin dshea-size' },
-            h('span', { className: 'dshea-spin-label' }, COPY.scale),
-            h('input', {
-              type: 'range',
-              min: 10,
-              max: 300,
-              step: 5,
-              value: scale,
-              className: 'dshea-range',
-              onChange: (event) => onScale(event.target.value),
-              onInput: (event) => onScale(event.target.value),
-            }),
-            h('span', { className: 'dshea-spin-value' }, Math.round(scale) + '%'),
-          ),
-          h(
-            'label',
-            { className: 'dshea-spin dshea-halo' },
-            h('span', { className: 'dshea-spin-label' }, COPY.halo),
-            h('input', {
-              type: 'range',
-              min: 0,
-              max: 400,
-              step: 5,
-              value: halo,
-              className: 'dshea-range',
-              onChange: (event) => onHalo(event.target.value),
-              onInput: (event) => onHalo(event.target.value),
-            }),
-            h('span', { className: 'dshea-spin-value' }, Math.round(halo) + '%'),
+            'button',
+            {
+              type: 'button',
+              className: 'dshea-btn dshea-style-btn' + (styleOpen ? ' is-on' : ''),
+              onClick: () => setStyleOpen((open) => !open),
+              'aria-expanded': styleOpen ? 'true' : 'false',
+            },
+            COPY.style,
           ),
           h(
             'label',
@@ -3131,6 +3142,79 @@ const NS = 'error-atlas'
           h('button', { type: 'button', className: 'dshea-btn', onClick: onRelayout, disabled: !hasNodes }, COPY.relayout),
           h('button', { type: 'button', className: 'dshea-btn', onClick: onExport, disabled: busy }, COPY.exportMarkdown),
           h('button', { type: 'button', className: 'dshea-btn dshea-danger', onClick: onClear, disabled: busy || !hasNodes }, COPY.clear),
+        ),
+      )
+
+      const stylePanel = h(
+        'div',
+        { className: styleOpen ? 'dshea-style is-open' : 'dshea-style' },
+                    h(
+              'label',
+              { className: 'dshea-spin' },
+              h('span', { className: 'dshea-spin-label' }, COPY.spin),
+              h('input', {
+                type: 'range',
+                min: 0,
+                max: 100,
+                step: 1,
+                value: spin,
+                className: 'dshea-range',
+                // Both handlers on purpose: `onChange` is React's normal range
+                // path, `onInput` keeps the control alive even if an intermediate
+                // layer swallows the synthetic change event.
+                onChange: (event) => onSpin(event.target.value),
+                onInput: (event) => onSpin(event.target.value),
+              }),
+              h('span', { className: 'dshea-spin-value' }, Math.round(spin) + '%'),
+              h('span', { className: 'dshea-spin-rate' }, rateLabel),
+            ),
+            h(
+              'label',
+              { className: 'dshea-spin dshea-size' },
+              h('span', { className: 'dshea-spin-label' }, COPY.scale),
+              h('input', {
+                type: 'range',
+                min: 10,
+                max: 300,
+                step: 5,
+                value: scale,
+                className: 'dshea-range',
+                onChange: (event) => onScale(event.target.value),
+                onInput: (event) => onScale(event.target.value),
+              }),
+              h('span', { className: 'dshea-spin-value' }, Math.round(scale) + '%'),
+            ),
+            h(
+              'label',
+              { className: 'dshea-spin dshea-halo' },
+              h('span', { className: 'dshea-spin-label' }, COPY.halo),
+              h('input', {
+                type: 'range',
+                min: 0,
+                max: 400,
+                step: 5,
+                value: halo,
+                className: 'dshea-range',
+                onChange: (event) => onHalo(event.target.value),
+                onInput: (event) => onHalo(event.target.value),
+              }),
+              h('span', { className: 'dshea-spin-value' }, Math.round(halo) + '%'),
+            ),
+        h(
+          'label',
+          { className: 'dshea-spin dshea-flow' },
+          h('span', { className: 'dshea-spin-label' }, COPY.flow),
+          h('input', {
+            type: 'range',
+            min: 20,
+            max: 400,
+            step: 5,
+            value: flowScale,
+            className: 'dshea-range',
+            onChange: (event) => onFlowScale(event.target.value),
+            onInput: (event) => onFlowScale(event.target.value),
+          }),
+          h('span', { className: 'dshea-spin-value' }, Math.round(flowScale) + '%'),
         ),
       )
 
@@ -3352,7 +3436,7 @@ const NS = 'error-atlas'
         switchButton(COPY.memoryInject, injectOn, { inject: !injectOn }),
       )
 
-      return h('div', { className: 'dshea-root' }, header, stage, trendRow, memoryRow, boardView, logStrip)
+      return h('div', { className: 'dshea-root' }, header, stylePanel, stage, trendRow, memoryRow, boardView, logStrip)
     }
 
     function statCell(label, value) {

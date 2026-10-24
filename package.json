@@ -1,6 +1,6 @@
 {
   "name": "dsh-error-atlas",
-  "version": "0.11.14",
+  "version": "0.11.15",
   "type": "module",
   "description": "Records runtime errors and coding-task retrospectives, and renders them as an interactive GPU knowledge graph (WebGL) with lesson links, recurrence flags, program satellites, session islands, orbit-any-node camera, search, activity trends, and a caption switch.",
   "icon": "icon.svg",
