@@ -572,10 +572,10 @@ async function clientSection() {
   renderer.setFilters([], [])
   windowStub.__raf(1048)
   check('clearing the kind filter restores the node', state.alpha[exitIdx] > 0.5, String(state.alpha[exitIdx]))
-  const lessonLink = state.linkRoles.findIndex((role) => role === 'lesson')
+  const lessonLink = state.linkRoles.findIndex((role) => role === 'lesson' || role === 'stale')
   check('a lesson wire is labelled', lessonLink >= 0, String(lessonLink))
   const lessonAlpha = state.linkAlpha[lessonLink * 2]
-  renderer.setFilters([], ['lesson'])
+  renderer.setFilters([], ['lesson', 'stale'])
   check('a filtered-out wire goes dark', state.linkAlpha[lessonLink * 2] === 0, String(state.linkAlpha[lessonLink * 2]))
   renderer.setFilters([], [])
   check('clearing the wire filter restores it', state.linkAlpha[lessonLink * 2] === lessonAlpha)

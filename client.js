@@ -204,7 +204,7 @@ const NS = 'error-atlas'
     // Bumped on every client change so the panel itself can prove which bundle is
     // live. The chip next to the title shows it; if it is stale the page is running
     // an older bundle and no amount of editing here will be visible.
-    const BUILD = 'V50'
+    const BUILD = 'V51'
 
     const ZH = {
       nav: '错误星图',
@@ -254,6 +254,7 @@ const NS = 'error-atlas'
       linkHub: '枢纽辐条',
       linkProject: '程序系绳',
       linkLesson: '教训线',
+      linkStale: '失效教训',
       style: '外观',
       pause: '暂停',
       resume: '继续',
@@ -373,6 +374,7 @@ const NS = 'error-atlas'
       linkHub: 'Hub spokes',
       linkProject: 'Program tethers',
       linkLesson: 'Lesson wires',
+      linkStale: 'Failed lessons',
       style: 'Look',
       pause: 'Pause',
       resume: 'Resume',
@@ -1876,7 +1878,7 @@ const NS = 'error-atlas'
             const lc = stale ? STALE_COLOR : KIND_COLOR.retro || [0.78, 0.62, 1]
             linkColor.push(lc[0], lc[1], lc[2], lc[0], lc[1], lc[2])
             linkAlpha.push(stale ? 0.66 : 0.46, stale ? 0.66 : 0.46)
-            linkRoles.push('lesson')
+            linkRoles.push(stale ? 'stale' : 'lesson')
             continue
           }
           const ca = KIND_COLOR[nodes[a].kind] || [1, 1, 1]
@@ -3264,10 +3266,11 @@ const NS = 'error-atlas'
           chipRow(
             COPY.linkColors,
             [
-              ['core', '#ff6b6b', COPY.linkCore],
-              ['hub', '#ffb570', COPY.linkHub],
+              ['core', '#b4514f', COPY.linkCore],
+              ['hub', '#c98b62', COPY.linkHub],
               ['project', '#7fd4ff', COPY.linkProject],
               ['lesson', '#c7a4ff', COPY.linkLesson],
+              ['stale', '#ff5b4d', COPY.linkStale],
             ],
             offLinks,
             toggleLink,
