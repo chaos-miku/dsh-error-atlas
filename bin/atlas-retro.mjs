@@ -75,7 +75,7 @@ function list() {
 
 function bodyFrom(args2) {
   const body = {}
-  for (const key of ['title', 'done', 'cause', 'fix', 'lesson']) {
+  for (const key of ['title', 'done', 'cause', 'fix', 'lesson', 'essence']) {
     const value = flag(key)
     if (typeof value === 'string' && value.trim()) body[key] = value
   }
@@ -97,7 +97,7 @@ function patchFile(id, body) {
   const retro = data.retros.find((item) => item.id === id)
   if (!retro) return { ok: false, error: 'no retrospective ' + id }
   retro.auto = false
-  for (const key of ['title', 'done', 'cause', 'fix', 'lesson']) {
+  for (const key of ['title', 'done', 'cause', 'fix', 'lesson', 'essence']) {
     if (typeof body[key] === 'string') retro[key] = body[key].slice(0, 420)
   }
   if (Array.isArray(body.tags)) retro.tags = body.tags.slice(0, 8)
@@ -150,7 +150,9 @@ const USAGE = `atlas-retro — write a retrospective into the error atlas by han
   node bin/atlas-retro.mjs --port 65203 ...     # override the published host port
   node bin/atlas-retro.mjs --fields retros.json # one record or an array of records
 
-Fields: title, done, cause, fix, lesson (text); tags (a,b); ids / errorIds (e1,e2).
+Fields: title, done, cause, fix, lesson, essence (text); tags (a,b); ids / errorIds (e1,e2).
+An essence is the one injected line: "<if this> -> <root cause> -> <next time>"; without it
+the host derives one from the lesson on the next load.
 A --fields record needs "id" to upgrade an existing one, or title+lesson to create one.`
 
 async function main() {

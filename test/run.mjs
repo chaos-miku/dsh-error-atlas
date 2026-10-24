@@ -198,7 +198,7 @@ async function retroSection() {
   const prompt = host.sections.find((entry) => entry.name === 'error-atlas:retrospective')
   eq('the prompt section keeps its order slot', prompt && prompt.order, 300)
   const promptText = prompt && typeof prompt.text === 'function' ? prompt.text({}) : prompt && prompt.text
-  check('the prompt section is short', promptText && promptText.length < 400, 'length=' + (promptText && promptText.length))
+  check('the prompt section is short', promptText && promptText.length < 500, 'length=' + (promptText && promptText.length))
   eq('the atlas_retro tool is registered', host.tools.filter((tool) => tool.name === 'atlas_retro').length, 1)
 }
 
@@ -939,8 +939,65 @@ async function capSection() {
   eq('the default cap hides nothing', full.json.stats.truncated, 0)
 }
 
+async function noiseSection() {
+  section('noise')
+  const home = tempHome('noise')
+  const host = await bootHost(home)
+  const agent = { id: 'sess-noise' }
+
+  // Two different command lines that both run the same script: one signature, not two.
+  host.fire('tools/result', { name: 'pwsh', arguments: { command: 'cd D:/work; & "C:/Program Files/nodejs/node.exe" build.mjs' }, agent }, {
+    isError: false,
+    content: [{ type: 'text', text: 'boom\n[exit code: 1]' }],
+  })
+  host.fire('tools/result', { name: 'pwsh', arguments: { command: 'cd D:/other; node build.mjs' }, agent }, {
+    isError: false,
+    content: [{ type: 'text', text: 'boom\n[exit code: 1]' }],
+  })
+  const first = await host.call('/error-atlas/data')
+  const exits = first.json.nodes.filter((node) => node.kind === 'exit')
+  eq('the shell fingerprint collapses command variants', exits.length, 1)
+  check('the fingerprint names the script', /node build\.mjs/.test(exits[0].message), exits[0].message)
+  check('stderr rides along as the detail', /boom/.test(exits[0].message), exits[0].message)
+  eq('a described exit is not bare noise', first.json.stats.noise, 0)
+
+  // Five identical bare exits (no stderr) are churn: hidden, counted, and swtichable.
+  for (let i = 0; i < 6; i += 1) {
+    host.fire('tools/result', { name: 'pwsh', arguments: { command: 'cd D:/work; node silent.mjs' }, agent }, {
+      isError: false,
+      content: [{ type: 'text', text: '[exit code: 1]' }],
+    })
+  }
+  const hidden = await host.call('/error-atlas/data')
+  eq('bare repeats leave the graph', hidden.json.nodes.filter((node) => /silent\.mjs/.test(node.message)).length, 0)
+  check('and they are counted instead', hidden.json.stats.noise >= 1, 'noise=' + hidden.json.stats.noise)
+
+  const shown = await host.call('/error-atlas/prefs', 'POST', { showNoise: true })
+  eq('the switch is stored', shown.json.prefs.showNoise, true)
+  const revealed = await host.call('/error-atlas/data')
+  eq('asking for noise brings it back', revealed.json.nodes.filter((node) => /silent\.mjs/.test(node.message)).length, 1)
+
+  // Essence is what gets injected, and a retro that arrived without one gets one derived.
+  const withEssence = host.tools.find((tool) => tool.name === 'atlas_retro')
+  await withEssence.execute({
+    title: 'essence test',
+    lesson: 'An essay-length lesson that should never reach the prompt verbatim because it is far too long to be useful in context.',
+    essence: 'if a shell command fails twice -> command churn -> change the command, not the shell',
+  }, { agent })
+  await host.call('/error-atlas/retro', 'POST', {
+    title: 'derived essence',
+    lesson: '数据可视化里标签和相机距离是两个自由度',
+  })
+  const brief = host.contexts.find((entry) => entry.name === 'error-atlas:lessons')
+  const text = brief.text({})
+  check('the briefing uses the essence', /change the command, not the shell/.test(text), text.slice(0, 200))
+  check('and not the essay', !/essay-length lesson/.test(text), 'leaked the essay')
+  check('a missing essence is derived as a rule', /规则：/.test(text), text.slice(0, 300))
+  check('the briefing stays under three lessons', (text.match(/^- /gm) || []).length <= 3, text)
+}
+
 // ── run ────────────────────────────────────────────────────────────────────
-const sections = [storeSection, retroSection, prefsSection, trendSection, projectSection, exportSection, lessonSection, boardSection, clientSection, capSection, manifestSection]
+const sections = [storeSection, retroSection, prefsSection, trendSection, projectSection, exportSection, lessonSection, noiseSection, boardSection, clientSection, capSection, manifestSection]
 for (const run of sections) {
   try {
     await run()

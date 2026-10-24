@@ -52,7 +52,7 @@ const CODING_TOOLS = new Set(['write', 'edit', 'pwsh', 'bash', 'run_code', 'plug
  * with one of these prefixes never becomes a node. `cd`/`pwd` noise is the reason this
  * exists — it would otherwise eat the node budget and pollute the relapse count.
  */
-const PREF_DEFAULTS = { minCount: 1, ignore: [], prompt: true, inject: true }
+const PREF_DEFAULTS = { minCount: 1, ignore: [], prompt: true, inject: true, showNoise: false }
 
 function normalizeIgnore(value, limit = 24) {
   if (!Array.isArray(value)) return []
@@ -123,6 +123,76 @@ function normalizeMessage(value, limit) {
   text = text.replace(/\s+/g, ' ').trim()
   if (!text) text = 'unknown error'
   return text.length > limit ? text.slice(0, limit - 1) + '…' : text
+}
+
+/**
+ * The identity of a failing command, not its whole command line.
+ *
+ * The shell hands us compound lines ("cd X; & node script.js"), and using that as the
+ * record message split one recurring failure into dozens of near-duplicate signatures.
+ * This keeps the executable, its meaningful sub command, and the script it ran.
+ */
+function commandFingerprint(command) {
+  const KNOWN = /^(node|npm|pnpm|yarn|git|gh|rg|python|python3|pwsh|powershell|cmd|deno|bun|cargo|go|dotnet|tsc|vite|eslint|jest|vitest)$/
+  const EXE = /\.(exe|cmd|bat|ps1)$/i
+  const flat = String(command || '').replace(/\s+/g, ' ').trim()
+  if (!flat) return ''
+  const segments = flat
+    .split(/;|&&|\|\||\n/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+  const exeOf = (segment) => {
+    const tokens = segment.match(/"[^"]*"|'[^']*'|\S+/g) || []
+    const clean = tokens.map((token) => token.replace(/^["']|["']$/g, ''))
+    const head = clean[0]
+    if (!head) return null
+    const bare = head.split(/[\\/]/).pop()
+    const name = bare.replace(EXE, '').toLowerCase()
+    if (!KNOWN.test(name)) return null
+    return { name, rest: clean.slice(1) }
+  }
+  // The failing command is the last one in the pipeline; heredoc bodies and script
+  // fragments are not commands, so walk backwards to the last real executable.
+  let found = null
+  for (let i = segments.length - 1; i >= 0; i -= 1) {
+    const candidate = segments[i].replace(/^&\s*/, '').replace(/^@'\s*/, '')
+    const parsed = exeOf(candidate)
+    if (parsed) {
+      found = parsed
+      break
+    }
+  }
+  if (!found) return 'shell'
+  const inline = found.rest[0] || ''
+  if (/^-(e|c|m)$/i.test(inline)) return found.name + ' ' + inline
+  // `npm run <script>` is the useful half of a package-manager failure.
+  if (/^(npm|pnpm|yarn|bun)$/.test(found.name) && found.rest[0] === 'run' && found.rest[1]) {
+    return found.name + ' run ' + found.rest[1]
+  }
+  const qualifier = found.rest.find((token) => token && !token.startsWith('-'))
+  if (!qualifier) return found.name
+  const file = qualifier.split(/[\\/]/).pop()
+  return found.name + ' ' + (file || qualifier)
+}
+
+/** The first useful line of stderr: the part of a failure that is not the command. */
+function exitDetailOf(result) {
+  const blocks = Array.isArray(result && result.content) ? result.content : []
+  const lines = []
+  for (const block of blocks) {
+    if (!block || block.type !== 'text' || typeof block.text !== 'string') continue
+    for (const raw of block.text.split(/\r?\n/)) {
+      const line = raw.trim()
+      if (!line) continue
+      if (/^\[exit code: -?\d+\]$/.test(line)) continue
+      if (/^\[\d+ms\]$/.test(line)) continue
+      lines.push(line)
+    }
+  }
+  // stderr trails stdout, so the last meaningful line is the error itself.
+  const last = lines.length > 0 ? lines[lines.length - 1] : ''
+  if (!last) return ''
+  return clip(last.replace(/^\s*(error|fatal|Error|FATAL):\s*/, ''), 90)
 }
 
 function summarizeArguments(args) {
@@ -316,6 +386,7 @@ function createStore(config) {
             cause: clip(entry.cause, config.retroChars),
             fix: clip(entry.fix, config.retroChars),
             lesson: clip(entry.lesson, config.retroChars),
+            essence: clip(entry.essence, 160) || undefined,
             tags: Array.isArray(entry.tags) ? entry.tags.filter((t) => typeof t === 'string').slice(0, 8) : [],
             tools: Array.isArray(entry.tools) ? entry.tools.filter((t) => typeof t === 'string').slice(0, 12) : [],
             files: Array.isArray(entry.files) ? entry.files.filter((t) => typeof t === 'string').slice(0, 12) : [],
@@ -340,9 +411,68 @@ function createStore(config) {
           state.prefs.minCount = Math.max(1, Math.min(50, Math.floor(parsed.prefs.minCount)))
         }
         if (Array.isArray(parsed.prefs.ignore)) state.prefs.ignore = normalizeIgnore(parsed.prefs.ignore)
-    if (typeof parsed.prefs.prompt === 'boolean') state.prefs.prompt = parsed.prefs.prompt
-    if (typeof parsed.prefs.inject === 'boolean') state.prefs.inject = parsed.prefs.inject
+        if (typeof parsed.prefs.showNoise === 'boolean') state.prefs.showNoise = parsed.prefs.showNoise
+        if (typeof parsed.prefs.prompt === 'boolean') state.prefs.prompt = parsed.prefs.prompt
+        if (typeof parsed.prefs.inject === 'boolean') state.prefs.inject = parsed.prefs.inject
       }
+      let migrated = false
+      // ── store v3: exit messages become command fingerprints ────────────────
+      // Before this, an exit record carried the whole command line, so one recurring
+      // failure arrived as dozens of near-identical signatures. Fold them once, and
+      // remap every retrospective that pointed at a merged-away id.
+      if (Number.isFinite(parsed.version) && parsed.version < 3) {
+        const remap = new Map()
+        const canonical = new Map()
+        for (const entry of [...state.records.values()]) {
+          if (entry.kind !== 'exit') continue
+          const parts = String(entry.message || '').split(' · ')
+          const code = parts[0] || 'exit code 1'
+          const command = parts.slice(1).join(' · ')
+          const fingerprint = commandFingerprint(command) || command
+          const detail = parts.length > 2 ? parts[parts.length - 1] : ''
+          const message = code + (fingerprint ? ' · ' + fingerprint : '') + (detail ? ' · ' + detail : '')
+          const key = 'exit\u0000' + entry.name + '\u0000' + message
+          const target = canonical.get(key)
+          if (!target) {
+            const merged = Object.assign({}, entry, { message, key })
+            canonical.set(key, merged)
+            if (merged !== entry) state.records.delete(entry.key)
+            state.records.set(key, merged)
+            remap.set(entry.id, merged.id)
+            continue
+          }
+          target.count += entry.count
+          target.first = Math.min(target.first, entry.first)
+          target.last = Math.max(target.last, entry.last)
+          for (const session of entry.sessions || []) {
+            if (target.sessions.length < 12 && !target.sessions.includes(session)) target.sessions.push(session)
+          }
+          state.records.delete(entry.key)
+          remap.set(entry.id, target.id)
+        }
+        const alive = new Set([...state.records.values()].map((entry) => entry.id))
+        for (const retro of state.retros) {
+          if (!Array.isArray(retro.errorIds) || retro.errorIds.length === 0) continue
+          const next = []
+          for (const id of retro.errorIds) {
+            const mapped = remap.get(id) || id
+            if (alive.has(mapped) && !next.includes(mapped)) next.push(mapped)
+          }
+          retro.errorIds = next.slice(0, 12)
+        }
+        migrated = true
+      }
+
+      for (const retro of state.retros) {
+        if (!retro.essence) {
+          const derived = deriveEssence(retro)
+          if (derived) {
+            retro.essence = clip(derived, 160)
+            migrated = true
+          }
+        }
+      }
+      if (migrated) save()
       // A store written before lesson links existed carries only failure text on its
       // retrospectives; give those pipelines back once.
       if (state.retros.length > 0 && state.records.size > 0) {
@@ -361,7 +491,7 @@ function createStore(config) {
     try {
       mkdirSync(dir, { recursive: true })
       const payload = JSON.stringify({
-        version: 2,
+        version: 3,
         updatedAt: state.updatedAt,
         records: [...state.records.values()],
         log: state.log,
@@ -491,6 +621,17 @@ function createStore(config) {
     if (state.retros.length > config.maxRetros) state.retros.length = config.maxRetros
   }
 
+  /** A lesson is only worth injecting if it says what to do next, in one line. */
+  function deriveEssence(retro) {
+    const raw = String((retro && (retro.essence || retro.lesson)) || '').trim()
+    if (!raw) return ''
+    const flat = raw.replace(/\s+/g, ' ')
+    const trimmed = flat.length > 96 ? flat.slice(0, 95) + '…' : flat
+    return /→/.test(trimmed) || /^(如果|当|别|不要|先|记得|用|把|每次|任何|永远|写|改|加|删|查|量|先量)/.test(trimmed)
+      ? trimmed
+      : '规则：' + trimmed
+  }
+
   function addRetro(input) {
     const at = Date.now()
     state.retroSeq += 1
@@ -498,6 +639,7 @@ function createStore(config) {
       id: 'r' + state.retroSeq.toString(36),
       at,
       auto: input.auto === true,
+      essence: clip(input.essence || '', 160) || undefined,
       title: clip(input.title, 120) || '未命名任务',
       done: clip(input.done, config.retroChars),
       cause: clip(input.cause, config.retroChars),
@@ -544,6 +686,7 @@ function createStore(config) {
     existing.cause = pick(input.cause, existing.cause, config.retroChars)
     existing.fix = pick(input.fix, existing.fix, config.retroChars)
     existing.lesson = pick(input.lesson, existing.lesson, config.retroChars)
+    existing.essence = pick(input.essence, existing.essence, 160)
     existing.tags = list(input.tags, existing.tags, 8)
     existing.tools = list(input.tools, existing.tools, 12)
     existing.files = list(input.files, existing.files, 12)
@@ -574,6 +717,7 @@ function createStore(config) {
       ignore: [...state.prefs.ignore],
       prompt: state.prefs.prompt,
       inject: state.prefs.inject,
+      showNoise: state.prefs.showNoise,
     }
   }
 
@@ -585,9 +729,22 @@ function createStore(config) {
     if (Array.isArray(patch.ignore)) state.prefs.ignore = normalizeIgnore(patch.ignore)
     if (typeof patch.prompt === 'boolean') state.prefs.prompt = patch.prompt
     if (typeof patch.inject === 'boolean') state.prefs.inject = patch.inject
+    if (typeof patch.showNoise === 'boolean') state.prefs.showNoise = patch.showNoise
     state.updatedAt = Date.now()
     save()
     return prefs()
+  }
+
+  /**
+   * A failure whose only evidence is the exit code, repeated enough times to be churn.
+   * Real failures bring stderr with them; bare repeats are the "same command failed
+   * again" noise that used to drown the graph and poison lesson staleness.
+   */
+  function isBareExit(entry) {
+    if (!entry || entry.kind !== 'exit') return false
+    if (entry.count < 5) return false
+    const segments = String(entry.message || '').split(' · ')
+    return segments.length < 3
   }
 
   function clear() {
@@ -698,6 +855,7 @@ function createStore(config) {
           at: retro.at,
           auto: !!retro.auto,
           title: retro.title,
+          essence: retro.essence || deriveEssence(retro),
           lesson: retro.lesson || '',
           cause: retro.cause || '',
           fix: retro.fix || '',
@@ -721,17 +879,22 @@ function createStore(config) {
       // Switched off in the panel: an empty string makes the context section vanish, so
       // a user who does not want injected lessons pays nothing per request.
       if (state.prefs.inject === false) return ''
-      const lessons = lessonList()
+      // Auto skeletons are bookkeeping, not lessons learned: they never make it in.
+      const lessons = lessonList().filter((item) => !item.auto)
       if (lessons.length === 0) return ''
       // Two traps plus two fresh rules is about the most a model will actually use;
       // the full text stays one tool call away.
-      const stale = lessons.filter((item) => item.stale > 0).slice(0, 2)
+      // Only a lesson that points at a real error can be disproved; a skeleton without
+      // errorIds can never come back, so it can never be a trap either.
+      const stale = lessons.filter((item) => item.stale > 0 && item.errorIds.length > 0).slice(0, 1)
       const recent = lessons
         .filter((item) => item.stale === 0)
         .slice(0, Math.max(1, limit - stale.length))
       const line = (item, prefix) => {
-        const where = item.programs.length > 0 ? '[' + item.programs.join('/') + '] ' : ''
-        const text = item.lesson || item.done || item.title
+        const where = item.programs.length > 0 ? '[' + item.programs[0] + '] ' : ''
+        // Essence, not the essay: one actionable line per lesson, so three of them fit
+        // in the same budget the old five-paragraph version used.
+        const text = clip(item.essence || item.lesson || item.title, 110)
         return '- ' + prefix + where + text
       }
       const lines = ['## Error atlas: recorded lessons']
@@ -753,7 +916,9 @@ function createStore(config) {
     for (const entry of all) recordById.set(entry.id, entry)
     // Muted signatures still feed relapse detection (a lesson that failed on a noisy
     // command is still a failed lesson), they just do not become nodes.
-    const visible = all.filter(
+    const noisy = all.filter((entry) => isBareExit(entry))
+    const quiet = state.prefs.showNoise ? all : all.filter((entry) => !isBareExit(entry))
+    const visible = quiet.filter(
       (entry) => entry.count >= state.prefs.minCount && !isNoise(entry, state.prefs.ignore),
     )
     const muted = all.length - visible.length
@@ -1010,6 +1175,9 @@ function createStore(config) {
         matched: visible.length,
         truncated,
         muted,
+        // Bare repeats the graph hides by default; a non-zero count explains the gap
+        // between distinct and matched instead of leaking it silently.
+        noise: noisy.length,
         sessions: sessionTotals.size,
         tools: toolTotals.size,
         projects: [...projectErrors.values()].filter((set) => set.size > 0).length,
@@ -1269,11 +1437,16 @@ export function apply(ctx, config = {}) {
       } else {
         const code = exitCodeOf(result)
         if (code === undefined) return
-        const detail = summarizeArguments(exec.arguments)
+        const fingerprint = commandFingerprint(exec.arguments && exec.arguments.command)
+        const detail = exitDetailOf(result)
         entry = store.record({
           kind: 'exit',
           name: exec.name || 'tool',
-          message: 'exit code ' + code + (detail ? ' · ' + detail : ''),
+          message:
+            'exit code ' +
+            code +
+            (fingerprint ? ' · ' + fingerprint : '') +
+            (detail ? ' · ' + detail : ''),
           sessionId,
         })
       }
@@ -1479,6 +1652,11 @@ export function apply(ctx, config = {}) {
                 cause: { type: 'string', description: 'Root cause of the failure or the decision that mattered.' },
                 fix: { type: 'string', description: 'What solved it.' },
                 lesson: { type: 'string', description: 'The reusable rule that prevents this next time.' },
+                essence: {
+                  type: 'string',
+                  description:
+                    'One line, at most ~70 characters: "<if this situation> -> <root cause class> -> <what to do next time>". This is the only line other sessions will see, so make it a rule, not a summary.',
+                },
                 tags: { type: 'array', items: { type: 'string' }, description: 'Short labels, e.g. render, plugin, build.' },
                 errorIds: {
                   type: 'array',
@@ -1519,6 +1697,7 @@ export function apply(ctx, config = {}) {
                 cause: args.cause,
                 fix: args.fix,
                 lesson: args.lesson,
+                essence: args.essence,
                 tags: args.tags,
                 tools: buffer ? buffer.tools.slice(0, 12) : [],
                 files: buffer ? buffer.files.slice(0, 12) : [],
@@ -1627,7 +1806,7 @@ export function apply(ctx, config = {}) {
                 ? ''
                 : [
                     '## Task retrospectives',
-                    'A coding turn (files written, a command run, a failure diagnosed) ends with one `atlas_retro` call before the final answer: `title`, `done` (what changed, where), `cause`, `fix`, `lesson` (the rule that prevents a repeat), `tags`. Skip plain chat, reading and questions.',
+                    'A coding turn (files written, a command run, a failure diagnosed) ends with one `atlas_retro` call before the final answer: `title`, `done` (what changed, where), `cause`, `fix`, `lesson`, and `essence` — one line shaped "<if this happens> -> <root cause> -> <what to do next time>", because that line is what other sessions get injected. Skip plain chat, reading and questions.',
                   ].join('\n'),
           }),
         'error-atlas: retrospective prompt section',
