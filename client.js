@@ -204,7 +204,7 @@ const NS = 'error-atlas'
     // Bumped on every client change so the panel itself can prove which bundle is
     // live. The chip next to the title shows it; if it is stale the page is running
     // an older bundle and no amount of editing here will be visible.
-    const BUILD = 'V36'
+    const BUILD = 'V37'
 
     const ZH = {
       nav: '错误星图',
@@ -798,6 +798,7 @@ const NS = 'error-atlas'
         alphaDirty: true,
         signature: null,
         needsFit: true,
+        fitDist: 96,
         clock: 0,
         // Search is a client-side lens over the snapshot: matching nodes keep their
         // light, everything else fades so the shape of an answer is visible at once.
@@ -1263,6 +1264,7 @@ const NS = 'error-atlas'
         const dist = Math.max(48, Math.min(300, fitted))
         state.dist = dist
         state.targetDist = dist
+        state.fitDist = dist
       }
 
       function computeMatrices(width, height) {
@@ -1509,8 +1511,8 @@ const NS = 'error-atlas'
           gl.enableVertexAttribArray(nodeLoc.alpha)
           gl.vertexAttribPointer(nodeLoc.alpha, 1, gl.FLOAT, false, 0, 0)
 
-          gl.uniform1f(nodeLoc.uSizeMul, 3.0)
-          gl.uniform1f(nodeLoc.uAlphaMul, 0.048)
+          gl.uniform1f(nodeLoc.uSizeMul, 2.2)
+          gl.uniform1f(nodeLoc.uAlphaMul, 0.042)
           gl.drawArrays(gl.POINTS, 0, state.count)
 
           gl.uniform1f(nodeLoc.uSizeMul, 1.0)
@@ -1851,13 +1853,18 @@ const NS = 'error-atlas'
         state.focusTarget[0] = state.pos[index * 3]
         state.focusTarget[1] = state.pos[index * 3 + 1]
         state.focusTarget[2] = state.pos[index * 3 + 2]
+        // Close in until the picked node is clearly the subject: small nodes pull the
+        // camera quite close, hubs stay a little further out so their satellites fit.
+        const size = state.size[index] || 4
+        state.targetDist = Math.max(28, Math.min(state.targetDist, 36 + size * 2.4))
         return true
       }
 
       function clearFocus() {
-        state.focusTarget[0] = 0
+                state.focusTarget[0] = 0
         state.focusTarget[1] = 0
         state.focusTarget[2] = 0
+        state.targetDist = state.fitDist || 96
       }
 
       function resetView() {
