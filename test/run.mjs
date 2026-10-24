@@ -383,9 +383,11 @@ async function clientSection() {
   }
 
   const RAW = readFileSync(CLIENT, 'utf8')
+  // Windows checkouts may carry CRLF (git core.autocrlf), so the seam must not depend on
+  // a literal line ending; match the slot list itself instead.
   const SRC = RAW.replace(
-    "    return {\n      inject: ['slots'],",
-    "    return {\n      __debug: { createRenderer, isHubNode, withDev, cloudRadiusFor },\n      inject: ['slots'],",
+    /( *)return \{\r?\n( *)inject: \['slots'\],/,
+    '$1return {\n$2__debug: { createRenderer, isHubNode, withDev, cloudRadiusFor },\n$2inject: [\'slots\'],',
   ).replace('useState(() => withDev(null))', 'useState(() => withDev(window.__ATLAS_SEED__))')
   check('the test seam is present', SRC.includes('__debug'))
 
