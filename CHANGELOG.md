@@ -4,6 +4,12 @@ All notable changes to **dsh-error-atlas**. Versions follow `0.11.x` while the p
 is in the DSH marketplace pipeline; the panel's `V##` chip is the **client bundle** build
 stamp, which only moves when `client.js` changes — a `V51 · 0.11.24` panel is expected.
 
+## 0.11.25
+
+- Client tests no longer depend on the checkout's line endings: the test seam matches the
+  slot list with `\r?\n`, and `.gitattributes` normalises the repository to LF. First green
+  Windows CI run (it was failing on a CRLF checkout).
+
 ## 0.11.24
 
 - **CI**: GitHub Actions runs the full suite on Ubuntu and Windows, Node 20 and 22
