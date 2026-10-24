@@ -21,7 +21,7 @@ const NS = 'error-atlas'
     const CLOUD_RADIUS = 34
       // Program hubs orbit outside the error cloud, tethered to it by their links,
       // so a program reads as a satellite instead of another node in the ball.
-      const SATELLITE_RADIUS = 62
+      const SATELLITE_RADIUS = 46
       // Above this many nodes the exact O(n²) repulsion is replaced by a grid: the
       // pair count would otherwise freeze the panel while the atlas settles.
       const GRID_THRESHOLD = 400
@@ -204,7 +204,7 @@ const NS = 'error-atlas'
     // Bumped on every client change so the panel itself can prove which bundle is
     // live. The chip next to the title shows it; if it is stale the page is running
     // an older bundle and no amount of editing here will be visible.
-    const BUILD = 'V37'
+    const BUILD = 'V38'
 
     const ZH = {
       nav: '错误星图',
@@ -652,6 +652,11 @@ const NS = 'error-atlas'
       return CLOUD_RADIUS * Math.max(1, Math.sqrt(Math.max(1, n) / 240))
     }
 
+    /** Orbit radius for the program satellites: close enough to read as part of the map. */
+    function satelliteRadiusFor(cloud) {
+      return Math.max(SATELLITE_RADIUS, cloud * 1.45)
+    }
+
     /** Deterministic orbit slot for a hub, so a refresh never reshuffles the map. */
     function hubSlot(node, islandRadius, satRadius) {
       const hash = hashOf(node.id)
@@ -845,7 +850,7 @@ const NS = 'error-atlas'
         }
 
         const cloud = cloudRadiusFor(n)
-        const satRadius = Math.max(SATELLITE_RADIUS, cloud * 1.75)
+        const satRadius = satelliteRadiusFor(cloud)
         // Each window needs room: 34 units of arc per island, capped so the satellites
         // always stay outside the ring.
         let sessionCount = 0
@@ -870,7 +875,7 @@ const NS = 'error-atlas'
         const hubAnchors = new Map()
         for (let i = 0; i < n; i += 1) {
           const node = nodes[i]
-          if (isHubNode(node.kind)) hubAnchors.set(node.id, hubSlot(node, islandRadius, satRadius))
+          if (isHubNode(node.kind) && node.kind !== 'project') hubAnchors.set(node.id, hubSlot(node, islandRadius, satRadius))
         }
 
         // A failure belongs to the session window it happened in. That island anchor is
@@ -893,6 +898,60 @@ const NS = 'error-atlas'
           if (!a || !b) continue
           if (islandOf.has(a.id) && !islandOf.has(b.id) && !isHubNode(b.kind)) islandOf.set(b.id, islandOf.get(a.id))
           else if (islandOf.has(b.id) && !islandOf.has(a.id) && !isHubNode(a.kind)) islandOf.set(a.id, islandOf.get(b.id))
+        }
+
+
+        // A program satellite is placed on the side of the map where its own failures are:
+        // average the islands of the errors it is linked to and park it on that heading.
+        // A hash angle put a program next to the cluster on one refresh and opposite it on
+        // the next, which is why "docs" and "dsh-error-atlas" looked stranded.
+        const projectPull = new Map()
+        for (const link of state.links) {
+          const a = nodes[link.a]
+          const b = nodes[link.b]
+          if (!a || !b) continue
+          const project = a.kind === 'project' ? a : b.kind === 'project' ? b : null
+          if (!project) continue
+          const other = project === a ? b : a
+          if (isHubNode(other.kind)) continue
+          const island = islandOf.get(other.id)
+          const base = island ? hubAnchors.get(island) : null
+          if (!base) continue
+          const acc = projectPull.get(project.id) || [0, 0, 0]
+          acc[0] += base[0]
+          acc[1] += base[1]
+          acc[2] += base[2]
+          projectPull.set(project.id, acc)
+        }
+        // Programs whose failures share one window would all land on the same heading, so
+        // their headings are fanned out around that direction instead of stacking.
+        const wanted = []
+        for (const [id, acc] of projectPull) {
+          const horizontal = Math.hypot(acc[0], acc[2])
+          if (horizontal < 1e-3) continue
+          wanted.push({ id, angle: Math.atan2(acc[2], acc[0]), y: acc[1] })
+        }
+        wanted.sort((left, right) => left.angle - right.angle)
+        const taken = []
+        const angularGap = (a, b) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)))
+        for (const item of wanted) {
+          let angle = item.angle
+          let step = 1
+          while (taken.some((other) => angularGap(other, angle) < 0.36)) {
+            const swing = Math.ceil(step / 2) * 0.42
+            angle = item.angle + (step % 2 === 1 ? swing : -swing)
+            step += 1
+          }
+          taken.push(angle)
+          const ring = satRadius * (0.94 + (hashOf(item.id) % 60) / 600)
+          hubAnchors.set(item.id, [Math.cos(angle) * ring, item.y * 0.06, Math.sin(angle) * ring])
+        }
+
+        // A program with no linked failure yet still gets its place on the ring, so it never
+        // collapses into the cloud just because it has nothing to point at.
+        for (let i = 0; i < n; i += 1) {
+          const node = nodes[i]
+          if (node.kind === 'project' && !hubAnchors.has(node.id)) hubAnchors.set(node.id, hubSlot(node, islandRadius, satRadius))
         }
 
         // Anchors inside one island are spread with a golden-angle spiral, so the island is
@@ -1211,7 +1270,7 @@ const NS = 'error-atlas'
           let py = pos[ix + 1] - cy
           let pz = pos[ix + 2] - cz
           const r = Math.sqrt(px * px + py * py + pz * pz)
-          const limit = kind === 'project' ? Math.max(SATELLITE_RADIUS, cloud * 1.75) * 1.3 : isHubNode(kind) ? cloud * 1.35 : cloud * 1.12
+          const limit = kind === 'project' ? satelliteRadiusFor(cloud) * 1.3 : isHubNode(kind) ? cloud * 1.35 : cloud * 1.12
           if (r > limit) {
             const s = limit / r
             px *= s
