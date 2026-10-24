@@ -1,5 +1,7 @@
 # Error Atlas · 错误星图
 
+[![CI](https://github.com/chaos-miku/dsh-error-atlas/actions/workflows/ci.yml/badge.svg)](https://github.com/chaos-miku/dsh-error-atlas/actions/workflows/ci.yml)
+
 把 DSH 自己的运行错误和每个编程任务的复盘，沉淀成一张可以被**人看见**、也可以被**模型读到**的记忆图谱。
 
 ![错误星图面板](https://raw.githubusercontent.com/chaos-miku/dsh-error-atlas/main/docs/screenshot.jpg)

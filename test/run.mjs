@@ -355,12 +355,16 @@ async function clientSection() {
   section('client')
   let React
   let renderToStaticMarkup
-  // React comes from the running DSH profile, so the client checks exercise the same
-  // renderer the panel does. The lookup is derived, never absolute: DSH_HOME wins, then
-  // the conventional home, and a missing profile only skips this section.
+  // React comes from the running DSH profile when there is one, so the client checks
+  // exercise the same renderer the panel does; a checkout with its own devDependencies
+  // (CI) falls back to the package's node_modules. The lookup is derived, never absolute:
+  // DSH_HOME wins, then the conventional home, then the two local node_modules roots,
+  // and a machine without any of them only skips this section.
   const homes = []
   if (process.env.DSH_HOME) homes.push(join(process.env.DSH_HOME, 'profiles', 'node_modules') + '/')
   homes.push(join(homedir(), '.dsh', 'profiles', 'node_modules') + '/')
+  homes.push(join(process.cwd(), 'node_modules') + '/')
+  homes.push(join(import.meta.dirname, '..', 'node_modules') + '/')
   for (const dir of homes) {
     if (!existsSync(dir)) continue
     try {

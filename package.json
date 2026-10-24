@@ -1,6 +1,6 @@
 {
   "name": "dsh-error-atlas",
-  "version": "0.11.23",
+  "version": "0.11.24",
   "type": "module",
   "description": "Records runtime errors and coding-task retrospectives, collapses noisy shell failures into command fingerprints, distils each lesson into one injected rule, and renders the whole thing as an interactive GPU knowledge graph (WebGL) with lesson links, recurrence flags, program satellites, session islands, orbit-any-node camera, search and activity trends.",
   "icon": "icon.svg",
@@ -43,7 +43,8 @@
     "locale/*.json",
     "icon.svg",
     "docs/*.jpg",
-    "docs/*.png"
+    "docs/*.png",
+    "CHANGELOG.md"
   ],
   "bin": {
     "atlas-retro": "bin/atlas-retro.mjs",
@@ -63,5 +64,9 @@
       "immediately": true,
       "inject": []
     }
+  },
+  "devDependencies": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
   }
 }
