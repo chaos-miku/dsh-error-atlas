@@ -204,7 +204,7 @@ const NS = 'error-atlas'
     // Bumped on every client change so the panel itself can prove which bundle is
     // live. The chip next to the title shows it; if it is stale the page is running
     // an older bundle and no amount of editing here will be visible.
-    const BUILD = 'V38'
+    const BUILD = 'V39'
 
     const ZH = {
       nav: '错误星图',
@@ -1915,7 +1915,7 @@ const NS = 'error-atlas'
         // Close in until the picked node is clearly the subject: small nodes pull the
         // camera quite close, hubs stay a little further out so their satellites fit.
         const size = state.size[index] || 4
-        state.targetDist = Math.max(28, Math.min(state.targetDist, 36 + size * 2.4))
+        state.targetDist = Math.max(12, Math.min(state.targetDist, 26 + size * 1.7))
         return true
       }
 
@@ -2005,8 +2005,8 @@ const NS = 'error-atlas'
 
       function onWheel(event) {
         event.preventDefault()
-        const factor = Math.exp((event.deltaY || 0) * 0.0012)
-        state.targetDist = Math.max(28, Math.min(340, state.targetDist * factor))
+        const factor = Math.exp((event.deltaY || 0) * 0.0021)
+        state.targetDist = Math.max(12, Math.min(420, state.targetDist * factor))
       }
 
       function onContextMenu(event) {
