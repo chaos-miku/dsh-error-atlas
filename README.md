@@ -87,6 +87,14 @@ DSH 报过的错、踩过的坑，默认会随会话结束消失。这个插件�
 
 市场安装：在 DSH 插件市场搜索 `error-atlas` / `错误星图`。
 
+从 npm 安装（推荐，装最新版）：
+
+```
+plugin_manager install_bundle target="dsh-error-atlas"
+```
+
+指定版本：`target="dsh-error-atlas@0.11.2"`。
+
 本地目录安装（开发用）：
 
 ```
@@ -116,6 +124,12 @@ node bin/atlas-digest.mjs --json          # 机器可读
 node bin/atlas-retro.mjs --list           # 列出复盘
 node bin/atlas-retro.mjs --upgrade <id> --lesson "…"   # 升级/改写某条复盘
 node bin/atlas-retro.mjs --new --title "…" --lesson "…" # 手写一条复盘
+```
+
+不想先装包也能跑（npx 直接从 npm 拉）：
+
+```
+npx -y -p dsh-error-atlas atlas-digest
 ```
 
 `atlas-retro` 优先通过宿主路由写入（`POST /error-atlas/retro`，仅回环可访问）；宿主不在时退化为直接改库文件并给出警告。

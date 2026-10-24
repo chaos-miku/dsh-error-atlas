@@ -88,8 +88,35 @@ const storePath =
 const topN = Number(opt('top', '6'))
 
 if (!existsSync(storePath)) {
-  console.error('atlas-digest: no store at ' + storePath)
-  process.exit(2)
+  // A fresh install has nothing to summarise yet: that is a state, not a failure.
+  if (wantJson) {
+    console.log(
+      JSON.stringify(
+        {
+          store: storePath,
+          version: null,
+          errors: 0,
+          hits: 0,
+          retros: 0,
+          modelRetros: 0,
+          autoRetros: 0,
+          staleLessons: 0,
+          stale: [],
+          top: [],
+          recent: [],
+          empty: true,
+        },
+        null,
+        2,
+      ),
+    )
+    process.exit(0)
+  }
+  console.log('')
+  console.log('  ERROR ATLAS · digest')
+  console.log('  ' + storePath)
+  console.log('  nothing recorded yet — install the plugin in DSH, do a coding task, then run again.')
+  process.exit(0)
 }
 
 // Tolerate a BOM: hand-edited stores written by PowerShell often carry one.
