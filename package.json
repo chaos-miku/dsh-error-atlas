@@ -44,7 +44,8 @@
     "icon.svg",
     "docs/*.jpg",
     "docs/*.png",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "screenshots.json"
   ],
   "bin": {
     "atlas-retro": "bin/atlas-retro.mjs",
