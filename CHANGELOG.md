@@ -4,6 +4,13 @@ All notable changes to **dsh-error-atlas**. Versions follow `0.11.x` while the p
 is in the DSH marketplace pipeline; the panel's `V##` chip is the **client bundle** build
 stamp, which only moves when `client.js` changes — a `V51 · 0.11.24` panel is expected.
 
+## Unreleased
+
+- Reverse-proxy deployments: `trustedRemoteAddresses` in the plugin config, or
+  `DSH_ERROR_ATLAS_TRUSTED_REMOTE_ADDRESSES` (comma separated), opts specific peer
+  addresses in. Empty by default, exact match only, IPv4-mapped peers normalised.
+  Unset means loopback-only, exactly as before.
+
 ## 0.11.26
 
 - `atlas_impact` — the read-only tool that says whether the mechanism pays for itself:

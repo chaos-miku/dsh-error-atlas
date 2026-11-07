@@ -1293,9 +1293,32 @@ function createStore(config) {
   }
 }
 
-function isLoopback(req) {
-  const address = (req.socket && req.socket.remoteAddress) || ''
-  return address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1' || address === ''
+const LOOPBACK_PEERS = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1'])
+
+// 双栈监听下，代理来的连接常是 IPv4-mapped 地址（::ffff:10.0.0.2），先归一再去比。
+function peerAddress(value) {
+  const text = String(value || '').trim().toLowerCase()
+  return text.startsWith('::ffff:') ? text.slice(7) : text
+}
+
+// 反向代理来源白名单：数组或逗号分隔字符串。空列表 = 只认回环，默认行为不变。
+function parseTrustedPeers(value) {
+  const raw = Array.isArray(value) ? value : typeof value === 'string' ? value.split(',') : []
+  const out = []
+  for (const item of raw) {
+    if (typeof item !== 'string') continue
+    const text = peerAddress(item)
+    if (text !== '' && !out.includes(text)) out.push(text)
+  }
+  return out
+}
+
+function isLoopback(req, trustedPeers = []) {
+  const address = peerAddress((req.socket && req.socket.remoteAddress) || '')
+  // 缺失来源地址的是宿主内部调用，一直放行（与旧版一致）。
+  if (address === '') return true
+  if (LOOPBACK_PEERS.has(address)) return true
+  return trustedPeers.includes(address)
 }
 
 function sendJson(res, status, body) {
@@ -1344,6 +1367,13 @@ function readJsonBody(req, limit = 64 * 1024) {
 }
 
 export function apply(ctx, config = {}) {
+  // 反向代理来源白名单：默认空。配了也只放行精确地址，回环判定一个都不放松。
+  const trustedPeers = parseTrustedPeers(
+    config && config.trustedRemoteAddresses !== undefined
+      ? config.trustedRemoteAddresses
+      : process.env.DSH_ERROR_ATLAS_TRUSTED_REMOTE_ADDRESSES,
+  )
+
   const settings = { ...DEFAULTS }
   if (config && typeof config === 'object') {
     for (const key of Object.keys(DEFAULTS)) {
@@ -1543,7 +1573,7 @@ export function apply(ctx, config = {}) {
             kind: 'exact',
             path: '/error-atlas/data',
             handler: (req, res) => {
-              if (!isLoopback(req)) {
+              if (!isLoopback(req, trustedPeers)) {
                 sendJson(res, 403, { error: 'loopback only' })
                 return
               }
@@ -1563,7 +1593,7 @@ export function apply(ctx, config = {}) {
             kind: 'exact',
             path: '/error-atlas/clear',
             handler: (req, res) => {
-              if (!isLoopback(req)) {
+              if (!isLoopback(req, trustedPeers)) {
                 sendJson(res, 403, { error: 'loopback only' })
                 return
               }
@@ -1584,7 +1614,7 @@ export function apply(ctx, config = {}) {
             kind: 'exact',
             path: '/error-atlas/export',
             handler: (req, res) => {
-              if (!isLoopback(req)) {
+              if (!isLoopback(req, trustedPeers)) {
                 sendJson(res, 403, { error: 'loopback only' })
                 return
               }
@@ -1619,7 +1649,7 @@ export function apply(ctx, config = {}) {
             kind: 'exact',
             path: '/error-atlas/prefs',
             handler: async (req, res) => {
-              if (!isLoopback(req)) {
+              if (!isLoopback(req, trustedPeers)) {
                 sendJson(res, 403, { ok: false, error: 'loopback only' })
                 return
               }
@@ -1653,7 +1683,7 @@ export function apply(ctx, config = {}) {
             kind: 'exact',
             path: '/error-atlas/retro',
             handler: async (req, res) => {
-              if (!isLoopback(req)) {
+              if (!isLoopback(req, trustedPeers)) {
                 sendJson(res, 403, { ok: false, error: 'loopback only' })
                 return
               }

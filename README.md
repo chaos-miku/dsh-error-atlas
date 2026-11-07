@@ -181,23 +181,34 @@ node bin/atlas-retro.mjs --new --title "…" --lesson "…" # 手写一条复盘
 npx -y -p dsh-error-atlas atlas-digest
 ```
 
-`atlas-retro` 优先通过宿主路由写入（`POST /error-atlas/retro`，仅回环可访问）；宿主不在时退化为直接改库文件并给出警告。
+`atlas-retro` 优先通过宿主路由写入（`POST /error-atlas/retro`，默认仅回环可访问）；宿主不在时退化为直接改库文件并给出警告。
 
 ## 数据与隐私
 
 - 数据只落在本机：`$DSH_HOME/error-atlas/records.json`（日志、聚合错误、复盘、偏好设置）；
 - 导出的 Markdown 写到 `$DSH_HOME/error-atlas/exports/`；
-- 所有 HTTP 路由（`/error-atlas/data|prefs|retro|clear|export`）都只接受回环地址；
+- 所有 HTTP 路由（`/error-atlas/data|prefs|retro|clear|export`）默认只接受回环地址；反向代理部署可用 `trustedRemoteAddresses` 显式放行（默认空，见下节）；
 - 不联网、不上报、不采集对话内容；错误消息里可能含命令与路径，介意的话用面板的「清空」一键删除运行时记录（开发错误、任务复盘是内置/用户自己的数据，不会被清空）。
 
 ## 开发与测试
 
 ```
-npm test        # 157 项断言：宿主事件/路由/存储 + 客户端渲染（借用本机 DSH 的 React）
+npm test        # 164 项断言：宿主事件/路由/存储 + 客户端渲染（借用本机 DSH 的 React）
 npm run smoke   # 干净 DSH_HOME 下的冷启动冒烟：空库 → 写复盘 → 读回 → CLI 可读
 ```
 
 客户端为零依赖手写 bundle（`window.__ModuleLoader__`），宿主为纯 ESM。面板标题旁的 `V51` 就是 BUILD 号，用来确认页面加载的是哪一代客户端代码。
+
+## 反向代理部署
+
+面板在浏览器里经反向代理访问时，宿主看到的来源是代理自己的地址而不是回环，默认会被 403。显式列出该地址即可：
+
+```yaml
+# cordis.patch.yml 中本插件的 config
+trustedRemoteAddresses: ['192.0.2.10'] # 示例地址，替换为反代自己的来源地址
+```
+
+也可用环境变量 `DSH_ERROR_ATLAS_TRUSTED_REMOTE_ADDRESSES`（逗号分隔），配置项优先。只做精确匹配（大小写与 `::ffff:` 前缀会归一），不支持网段；列进去的地址可读写全部路由，所以只该填反代自己的地址，并确保前面还有一层身份验证。默认空列表 = 只认回环，与旧版完全一致。
 
 ## 已知边界
 

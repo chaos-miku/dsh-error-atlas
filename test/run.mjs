@@ -80,12 +80,12 @@ async function bootHost(home, config = {}) {
   const fire = (event, ...args) => {
     for (const fn of handlers.get(event) || []) fn(...args)
   }
-  const call = async (path, method = 'GET', body) => {
+  const call = async (path, method = 'GET', body, peer = '127.0.0.1') => {
     const route = routes.get(path)
     if (!route) return { status: 404, json: null }
     const stream = Readable.from(body === undefined ? [] : [Buffer.from(JSON.stringify(body))])
     stream.method = method
-    stream.socket = { remoteAddress: '127.0.0.1' }
+    stream.socket = { remoteAddress: peer }
     const out = { status: 0, body: '' }
     await route.handler(stream, {
       writeHead(status) {
@@ -1134,8 +1134,33 @@ async function noiseSection() {
   eq('an ambient signature does not mark lessons stale', ambientLessons.lessons.filter((item) => item.stale > 0).length, 0)
 }
 
+// ── trusted peer ───────────────────────────────────────────────────────────
+// A reverse proxy terminates the browser connection and opens a new one, so the panel
+// sees the proxy's address instead of loopback. trustedRemoteAddresses names that address
+// explicitly; the default stays loopback-only.
+async function trustedPeerSection() {
+  section('trusted peer')
+  const home = tempHome('trust')
+
+  const closed = await bootHost(home)
+  eq('a proxy address is refused by default', (await closed.call('/error-atlas/data', 'GET', undefined, '192.0.2.1')).status, 403)
+
+  const open = await bootHost(home, { trustedRemoteAddresses: ['192.0.2.1'] })
+  eq('a listed proxy address is served', (await open.call('/error-atlas/data', 'GET', undefined, '192.0.2.1')).status, 200)
+  eq('loopback keeps working', (await open.call('/error-atlas/data')).status, 200)
+  eq('an unlisted address is still refused', (await open.call('/error-atlas/data', 'GET', undefined, '192.0.2.2')).status, 403)
+  eq('an IPv4-mapped peer matches its plain form', (await open.call('/error-atlas/data', 'GET', undefined, '::ffff:192.0.2.1')).status, 200)
+  eq('write routes follow the same rule', (await open.call('/error-atlas/clear', 'POST', undefined, '192.0.2.1')).status, 200)
+  eq('write routes refuse an unlisted address', (await open.call('/error-atlas/clear', 'POST', undefined, '192.0.2.2')).status, 403)
+
+  process.env.DSH_ERROR_ATLAS_TRUSTED_REMOTE_ADDRESSES = ' 192.0.2.1 , 192.0.2.2 '
+  const viaEnv = await bootHost(home)
+  eq('the env list is honoured when config is empty', (await viaEnv.call('/error-atlas/data', 'GET', undefined, '192.0.2.2')).status, 200)
+  delete process.env.DSH_ERROR_ATLAS_TRUSTED_REMOTE_ADDRESSES
+}
+
 // ── run ────────────────────────────────────────────────────────────────────
-const sections = [storeSection, retroSection, prefsSection, trendSection, projectSection, exportSection, lessonSection, noiseSection, impactSection, boardSection, clientSection, capSection, manifestSection]
+const sections = [storeSection, retroSection, prefsSection, trendSection, projectSection, exportSection, lessonSection, noiseSection, impactSection, boardSection, clientSection, capSection, manifestSection, trustedPeerSection]
 for (const run of sections) {
   try {
     await run()
