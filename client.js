@@ -204,7 +204,7 @@ const NS = 'error-atlas'
     // Bumped on every client change so the panel itself can prove which bundle is
     // live. The chip next to the title shows it; if it is stale the page is running
     // an older bundle and no amount of editing here will be visible.
-    const BUILD = 'V51'
+    const BUILD = 'V52'
 
     const ZH = {
       nav: '错误星图',
@@ -1006,14 +1006,36 @@ const NS = 'error-atlas'
         wanted.sort((left, right) => left.angle - right.angle)
         const taken = []
         const angularGap = (a, b) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)))
+        // The fan-out is a packing problem: a full circle only holds 2π/gap headings
+        // (17 at the preferred 0.36 rad). A store with more programs than that has no
+        // free heading at any swing distance, so the old unbounded `while` spun forever
+        // with the panel frozen mid-open. Two changes keep it terminating: the gap
+        // shrinks to what the circle can actually hold, and the search is capped — a
+        // program that still finds no slot takes a hashed heading instead of hanging.
+        const preferredGap = Math.min(0.36, (Math.PI * 2) / Math.max(1, wanted.length))
+        const minGap = Math.min(preferredGap, 0.02)
+        const maxSteps = 64
         for (const item of wanted) {
+          let gap = preferredGap
           let angle = item.angle
-          let step = 1
-          while (taken.some((other) => angularGap(other, angle) < 0.36)) {
-            const swing = Math.ceil(step / 2) * 0.42
-            angle = item.angle + (step % 2 === 1 ? swing : -swing)
-            step += 1
+          let placed = false
+          for (let pass = 0; pass < 4 && !placed; pass += 1) {
+            let step = 1
+            angle = item.angle
+            while (step <= maxSteps) {
+              if (!taken.some((other) => angularGap(other, angle) < gap)) {
+                placed = true
+                break
+              }
+              const swing = Math.ceil(step / 2) * 0.42
+              angle = item.angle + (step % 2 === 1 ? swing : -swing)
+              step += 1
+            }
+            if (!placed) gap = Math.max(minGap, gap * 0.5)
           }
+          // Last resort: a deterministic heading from the id, so the ring stays even and
+          // the same payload always lands the same way.
+          if (!placed) angle = ((hashOf(item.id) % 4096) / 4096) * Math.PI * 2
           taken.push(angle)
           const ring = satRadius * (0.94 + (hashOf(item.id) % 60) / 600)
           hubAnchors.set(item.id, [Math.cos(angle) * ring, item.y * 0.06, Math.sin(angle) * ring])
