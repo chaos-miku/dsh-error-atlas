@@ -611,6 +611,45 @@ async function clientSection() {
   check('a small atlas keeps the old stage', module.__debug.cloudRadiusFor(240) === 34, String(module.__debug.cloudRadiusFor(240)))
   check('a large atlas widens the stage', module.__debug.cloudRadiusFor(2400) > 3 * 34, module.__debug.cloudRadiusFor(2400).toFixed(1))
 
+  // A program heading is placed by fan-out, and a full circle only holds 2π/0.36 = 17
+  // of them. A real store eventually has more programs than that, and the first version
+  // spun forever on the 18th — the panel froze while opening, on a payload that had
+  // nothing else wrong with it. This fixture is the shape that froze it: 44 programs,
+  // each pulling on the same island, so every heading is contested.
+  const crowdedNodes = [{ id: 'root:dsh', kind: 'root', label: 'DSH', count: 44 }]
+  const crowdedLinks = []
+  for (let i = 0; i < 44; i += 1) {
+    crowdedNodes.push({ id: 'sessionhub:s' + i, kind: 'sessionhub', label: 'SESSION ' + i, count: 1 })
+    crowdedNodes.push({ id: 'e:' + i, kind: 'tool', label: 'edit', name: 'edit', message: 'e' + i, count: 1 })
+    crowdedNodes.push({ id: 'p:proj' + i, kind: 'project', label: 'proj' + i, name: 'proj' + i, count: 1 })
+    crowdedLinks.push({ s: 'sessionhub:s' + i, t: 'root:dsh' })
+    crowdedLinks.push({ s: 'e:' + i, t: 'sessionhub:s' + i })
+    crowdedLinks.push({ s: 'e:' + i, t: 'root:dsh' })
+    crowdedLinks.push({ s: 'e:' + i, t: 'p:proj' + i, kind: 'project' })
+    crowdedLinks.push({ s: 'p:proj' + i, t: 'root:dsh' })
+  }
+  const crowdedPayload = Object.assign({}, payload, {
+    stats: Object.assign({}, payload.stats, { shown: crowdedNodes.length, projects: 44, sessions: 44 }),
+    nodes: crowdedNodes,
+    links: crowdedLinks,
+    retros: [],
+  })
+  const crowdedStarted = Date.now()
+  renderer.setData(crowdedPayload)
+  const crowdedCost = Date.now() - crowdedStarted
+  check('44 programs settle instead of spinning', crowdedCost < 5000, crowdedCost + ' ms')
+  const crowdedState = renderer.__state()
+  const crowdedProjects = crowdedState.nodes.filter((node) => node.kind === 'project')
+  check('every crowded program still gets a heading', crowdedNodes.filter((node) => node.kind === 'project').length === 44)
+  const crowdedHeadings = crowdedProjects.map((node) => {
+    const i = crowdedState.byId.get(node.id)
+    return Math.atan2(crowdedState.anchor[i * 3 + 2], crowdedState.anchor[i * 3])
+  })
+  const uniqueHeadings = new Set(crowdedHeadings.map((a) => a.toFixed(3)))
+  check('crowded programs do not stack on one heading', uniqueHeadings.size >= 24, uniqueHeadings.size + ' of 44 headings')
+  const onRing = crowdedHeadings.every((a) => Number.isFinite(a))
+  check('crowded headings are all finite', onRing)
+
   // Session windows are islands: each failure must settle nearest its own window, not the
   // window of another conversation that happened to suffer the same tool.
   const islandPayload = {
